@@ -2,9 +2,9 @@
 
 EvoTaxa is a config-driven framework for taxonomy-guided evolution modeling.
 
-The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, searches local lineage chains, and emits forecast/social-analysis hooks.
+The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, separates trusted/candidate edges, searches local lineage chains, and emits forecast/social-analysis hooks.
 
-`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, taxonomy-graph feedback, and forecast-hook scoring.
+`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, quote-grounded edge evidence auditing, taxonomy-graph feedback, and forecast-hook scoring.
 
 ## Why Config-Driven
 
@@ -86,7 +86,12 @@ Each run writes:
     llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
     method_edges.paper_level.jsonl
+    method_edges.trusted.jsonl
+    method_edges.candidate.jsonl
+    method_edges.unverified.jsonl
     method_edges.aggregated.jsonl
+    method_edges.all_aggregated.jsonl
+    edge_evidence_audit.jsonl
     method_evidence_records.jsonl
     entity_summary.json
   search/
@@ -119,6 +124,17 @@ Each run writes:
 - `[graph.edge_cues]`: phrase cues for typed evolution edges.
 - `[llm]`: optional OpenAI-compatible model configuration for candidate and edge judging.
 - `[output]`: output root.
+
+## Edge Evidence
+
+Every edge is audited after construction. EvoTaxa checks quotes in `bottleneck`, `mechanism`, and `tradeoff` against the source and target documents, then writes:
+
+- `graph/method_edges.trusted.jsonl`: strong edge types above the trusted confidence threshold with verified quote evidence.
+- `graph/method_edges.candidate.jsonl`: plausible but weaker edges, including non-strong edge types and edges below the trusted threshold.
+- `graph/method_edges.unverified.jsonl`: edges below the candidate threshold or lacking usable evidence.
+- `graph/edge_evidence_audit.jsonl`: field-level quote checks and the reason for each edge status.
+
+Search, hooks, and feedback use trusted edges when available; if a run has no trusted edges, they fall back to candidate edges so small exploratory corpora still produce inspectable outputs.
 
 ## Current Scope
 

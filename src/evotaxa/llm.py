@@ -231,10 +231,12 @@ def judge_edge_evidence(
     }
     prompt = (
         "Audit this evolution edge. Extract bottleneck, mechanism, and tradeoff evidence from the source/target text.\n"
+        "Every evidence quote must be an exact copied span from the source or target text; leave quote empty if unsupported.\n"
         f"Edge JSON:\n{json.dumps(edge, ensure_ascii=False)}\n"
         f"Source text:\n{source_text[:3000]}\n"
         f"Target text:\n{target_text[:3000]}\n"
-        "Return JSON with edge_type, confidence, bottleneck, mechanism, tradeoff, and rationale."
+        "Return JSON with edge_type, confidence, bottleneck, mechanism, tradeoff, and rationale. "
+        "Each bottleneck/mechanism/tradeoff object should include description and quote."
     )
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
 

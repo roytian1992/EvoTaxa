@@ -36,6 +36,10 @@ entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "m
 method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame", "governance", "audit", "moderation"]
 min_entity_mentions = 1
 llm_entity_extraction_limit = 12
+llm_edge_judge_limit = 100
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
 
 [graph.entity_patterns]
 intervention = ["inoculation intervention", "community moderation", "platform labeling"]
@@ -50,4 +54,3 @@ enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence
 
 [output]
 root = "../examples/local_llm_output"
-

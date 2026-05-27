@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from evotaxa.config import load_config
+from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
 from evotaxa.llm import build_llm_client
+from evotaxa.models import Document, EvolutionEdge
 from evotaxa.pipeline import run_full, run_lite
 
 
@@ -28,6 +30,8 @@ def test_social_config_runs() -> None:
     assert manifest["counts"]["entities"] >= 3
     assert manifest["counts"]["filtered_entities"] >= 1
     assert manifest["counts"]["entity_link_records"] >= manifest["counts"]["entities"]
+    assert manifest["counts"]["trusted_edges"] >= 1
+    assert manifest["counts"]["downstream_edges"] == manifest["counts"]["trusted_edges"]
     assert (Path(manifest["output_root"]) / "hooks" / "social_analysis_hooks.jsonl").exists()
 
 
@@ -45,6 +49,10 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()
     assert (output_root / "graph" / "llm_entity_mentions.jsonl").exists()
+    assert (output_root / "graph" / "method_edges.trusted.jsonl").exists()
+    assert (output_root / "graph" / "method_edges.candidate.jsonl").exists()
+    assert (output_root / "graph" / "method_edges.unverified.jsonl").exists()
+    assert (output_root / "graph" / "edge_evidence_audit.jsonl").exists()
     assert (output_root / "feedback" / "taxonomy_graph_feedback.jsonl").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
 
@@ -113,3 +121,43 @@ def test_quote_grounded_llm_entity_mentions_are_merged() -> None:
     assert any(row["status"] == "accepted" for row in report)
     assert any(entity.canonical_name == "platform labeling" for entity in merged_entities)
     assert any(mention.evidence == "Platform labeling is an intervention for misinformation." for mention in merged_mentions)
+
+
+def test_edge_evidence_stratification_requires_grounded_quotes() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    doc = Document(
+        doc_id="D1",
+        title="Platform labeling",
+        text="Platform labeling extends warning labels by adding civic context.",
+    )
+    edge = EvolutionEdge(
+        edge_id="edge1",
+        source_entity="intervention__warning_labels",
+        target_entity="intervention__platform_labeling",
+        edge_type="extends",
+        source_document="D1",
+        target_document="D1",
+        time_delta_days=0,
+        taxonomy_nodes=["interventions"],
+        confidence=0.8,
+        evidence={
+            "mechanism": {
+                "description": "Adds civic context.",
+                "quote": "Platform labeling extends warning labels by adding civic context.",
+            },
+            "bottleneck": {"description": "", "quote": ""},
+            "tradeoff": {"description": "", "quote": ""},
+        },
+        substring_verified=False,
+    )
+    audit = audit_edge_evidence(edge, {"D1": doc}, config.graph)
+    assert audit["status"] == "trusted"
+    assert audit["verified_quote_fields"] == ["mechanism"]
+
+    trusted, candidates, unverified, rows = stratify_edges_by_evidence([edge], [doc], config.graph)
+    assert [item.edge_id for item in trusted] == ["edge1"]
+    assert candidates == []
+    assert unverified == []
+    assert rows[0]["quote_checks"][0]["reason"] == "missing_quote"
+    assert trusted[0].substring_verified is True
+    assert trusted[0].evidence["evidence_audit"]["status"] == "trusted"

@@ -101,6 +101,7 @@ The config controls:
 - entity seed patterns,
 - entity alias maps,
 - edge cue phrases,
+- edge evidence thresholds,
 - output location.
 
 This is what makes the same code usable for scientific research and social science.
@@ -161,3 +162,26 @@ enabled_tasks = []
 Use `enabled_tasks = ["*"]` only when every LLM-backed task may call the configured server.
 
 `run-full` writes `audit/llm_cache.jsonl` by default. Repeated prompts reuse this cache, which makes local LLM experiments reproducible and cheaper to resume. LLM outputs are schema-checked before they can modify entity mentions, edge evidence, or taxonomy expansion candidates.
+
+## Edge Evidence Contract
+
+Each edge may carry `bottleneck`, `mechanism`, and `tradeoff` objects under `evidence`. Each object should include:
+
+```json
+{
+  "description": "short analytical description",
+  "quote": "exact quote copied from the source or target document"
+}
+```
+
+EvoTaxa verifies every quote against the source and target document text. The edge status is controlled by:
+
+```toml
+[graph]
+llm_edge_judge_limit = 100
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
+```
+
+`graph/method_edges.paper_level.jsonl` keeps all edges. `graph/method_edges.trusted.jsonl`, `graph/method_edges.candidate.jsonl`, and `graph/method_edges.unverified.jsonl` provide the auditable split. `graph/edge_evidence_audit.jsonl` records quote-level verification results and status reasons.

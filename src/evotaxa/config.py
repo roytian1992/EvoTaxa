@@ -93,8 +93,12 @@ class GraphConfig:
     max_entities_per_document: int = 12
     max_edge_candidates_per_entity: int = 24
     llm_entity_extraction_limit: int = 12
+    llm_edge_judge_limit: int = 100
     alias_similarity_threshold: float = 0.86
     min_entity_quality: float = 0.42
+    trusted_edge_confidence_threshold: float = 0.65
+    candidate_edge_confidence_threshold: float = 0.35
+    require_verified_evidence_for_trusted: bool = True
     entity_allowlist: list[str] = field(default_factory=list)
     entity_denylist: list[str] = field(default_factory=list)
     generic_entity_phrases: list[str] = field(default_factory=lambda: [
@@ -284,8 +288,12 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
         llm_entity_extraction_limit=int(graph_raw.get("llm_entity_extraction_limit") or 12),
+        llm_edge_judge_limit=int(graph_raw.get("llm_edge_judge_limit", 100)),
         alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
         min_entity_quality=float(graph_raw.get("min_entity_quality") or 0.42),
+        trusted_edge_confidence_threshold=float(graph_raw.get("trusted_edge_confidence_threshold", 0.65)),
+        candidate_edge_confidence_threshold=float(graph_raw.get("candidate_edge_confidence_threshold", 0.35)),
+        require_verified_evidence_for_trusted=bool(graph_raw.get("require_verified_evidence_for_trusted", True)),
         entity_allowlist=_list(graph_raw, "entity_allowlist", []),
         entity_denylist=_list(graph_raw, "entity_denylist", []),
         generic_entity_phrases=_list(graph_raw, "generic_entity_phrases", GraphConfig().generic_entity_phrases),

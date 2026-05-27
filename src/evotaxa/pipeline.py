@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from evotaxa.config import EvoTaxaConfig, load_config
+from evotaxa.edge_evidence import stratify_edges_by_evidence
 from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
 from evotaxa.entity_quality import filter_entities_by_quality
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
@@ -120,7 +121,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     if full and edges:
         doc_map = {doc.doc_id: doc for doc in docs}
         judged_edges = []
-        for edge in edges[:100]:
+        for edge in edges[: max(0, config.graph.llm_edge_judge_limit)]:
             record = judge_edge_evidence(
                 llm_client,
                 edge=edge.to_record(),
@@ -131,14 +132,16 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             judged_edges.append(_apply_edge_judgement(edge, record.output))
         judged_ids = {edge.edge_id for edge in judged_edges}
         edges = [*judged_edges, *[edge for edge in edges if edge.edge_id not in judged_ids]]
-    aggregated_edges = aggregate_edges(edges)
-    chains = search_evolution_chains(edges, strong_edge_types=config.graph.strong_edge_types)
-    branch_points = extract_branch_points(edges, strong_edge_types=config.graph.strong_edge_types)
-    forecast_hooks = build_forecast_hooks(edges, chains, branch_points, strong_edge_types=config.graph.strong_edge_types)
-    edge_index = {edge.edge_id: edge.to_record() for edge in edges}
+    trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
+    downstream_edges = _downstream_edges(trusted_edges, candidate_edges, unverified_edges)
+    aggregated_edges = aggregate_edges(downstream_edges)
+    chains = search_evolution_chains(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    branch_points = extract_branch_points(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    forecast_hooks = build_forecast_hooks(downstream_edges, chains, branch_points, strong_edge_types=config.graph.strong_edge_types)
+    edge_index = {edge.edge_id: edge.to_record() for edge in downstream_edges}
     forecast_hooks = score_forecast_hooks(forecast_hooks, edge_index) if full else forecast_hooks
     social_hooks = build_social_analysis_hooks(forecast_hooks)
-    feedback_rows = build_taxonomy_graph_feedback(nodes, entities, edges, expansion_candidates) if full else []
+    feedback_rows = build_taxonomy_graph_feedback(nodes, entities, downstream_edges, expansion_candidates) if full else []
     feedback_events = synthesize_feedback_events(feedback_rows) if full else []
     taxonomy_events = [*taxonomy_events, *feedback_events]
 
@@ -163,7 +166,12 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "graph" / "llm_entity_mentions.jsonl", llm_entity_report)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
     write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in edges))
+    write_jsonl(output_root / "graph" / "method_edges.trusted.jsonl", (edge.to_record() for edge in trusted_edges))
+    write_jsonl(output_root / "graph" / "method_edges.candidate.jsonl", (edge.to_record() for edge in candidate_edges))
+    write_jsonl(output_root / "graph" / "method_edges.unverified.jsonl", (edge.to_record() for edge in unverified_edges))
     write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", aggregated_edges)
+    write_jsonl(output_root / "graph" / "method_edges.all_aggregated.jsonl", aggregate_edges(edges))
+    write_jsonl(output_root / "graph" / "edge_evidence_audit.jsonl", edge_evidence_audit)
     write_jsonl(output_root / "graph" / "method_evidence_records.jsonl", _evidence_rows(edges))
     write_json(output_root / "graph" / "entity_summary.json", entity_frequency_summary(entities))
 
@@ -174,7 +182,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_json(output_root / "hooks" / "hook_score_report.json", build_hook_score_report(forecast_hooks) if full else {"hook_count": len(forecast_hooks)})
     write_jsonl(output_root / "feedback" / "taxonomy_graph_feedback.jsonl", feedback_rows)
     write_jsonl(output_root / "audit" / "llm_judge_records.jsonl", (record.to_record() for record in llm_records))
-    write_jsonl(output_root / "audit" / "unverified_edges.jsonl", (edge.to_record() for edge in edges if not edge.substring_verified))
+    write_jsonl(output_root / "audit" / "unverified_edges.jsonl", (edge.to_record() for edge in unverified_edges))
     write_jsonl(output_root / "audit" / "low_confidence_nodes.jsonl", _low_confidence_nodes(node_quality))
 
     manifest = {
@@ -207,6 +215,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "llm_entity_mentions": sum(1 for row in llm_entity_report if row.get("status") == "accepted"),
             "mentions": len(mentions),
             "paper_level_edges": len(edges),
+            "trusted_edges": len(trusted_edges),
+            "candidate_edges": len(candidate_edges),
+            "unverified_edges": len(unverified_edges),
+            "downstream_edges": len(downstream_edges),
             "aggregated_edges": len(aggregated_edges),
             "evolution_chains": len(chains),
             "branch_points": len(branch_points),
@@ -229,6 +241,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "entity_quality_report": "graph/entity_quality_report.jsonl",
             "llm_entity_mentions": "graph/llm_entity_mentions.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
+            "trusted_method_edges": "graph/method_edges.trusted.jsonl",
+            "candidate_method_edges": "graph/method_edges.candidate.jsonl",
+            "unverified_method_edges": "graph/method_edges.unverified.jsonl",
+            "edge_evidence_audit": "graph/edge_evidence_audit.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
             "taxonomy_graph_feedback": "feedback/taxonomy_graph_feedback.jsonl",
@@ -284,6 +300,14 @@ def _merge_assignments(left: dict[str, list[str]], right: dict[str, list[str]]) 
     for doc_id, node_ids in right.items():
         merged.setdefault(doc_id, set()).update(node_ids)
     return {doc_id: sorted(node_ids) for doc_id, node_ids in sorted(merged.items())}
+
+
+def _downstream_edges(trusted_edges: list[Any], candidate_edges: list[Any], unverified_edges: list[Any]) -> list[Any]:
+    if trusted_edges:
+        return trusted_edges
+    if candidate_edges:
+        return candidate_edges
+    return unverified_edges
 
 
 def _apply_edge_judgement(edge: Any, judgement: dict[str, Any]) -> Any:

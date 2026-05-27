@@ -46,6 +46,10 @@ strong_edge_types = ["extends", "improves", "replaces", "adapts"]
 min_entity_mentions = 1
 max_entities_per_document = 10
 min_entity_quality = 0.42
+llm_edge_judge_limit = 100
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
 entity_denylist = ["related work", "this paper"]
 
 [graph.entity_patterns]

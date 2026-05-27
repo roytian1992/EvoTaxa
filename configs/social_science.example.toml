@@ -70,6 +70,10 @@ method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame
 min_entity_mentions = 1
 max_entities_per_document = 12
 min_entity_quality = 0.42
+llm_edge_judge_limit = 100
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
 entity_denylist = ["it addresses the problem of", "content labeling intervention content labeling"]
 generic_entity_phrases = ["this", "that", "it", "study", "paper", "problem", "challenge", "result", "section", "figure", "table"]
 
