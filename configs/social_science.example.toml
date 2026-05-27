@@ -1,0 +1,84 @@
+[project]
+name = "EvoTaxa Social Science Pilot"
+domain_id = "misinformation_governance"
+run_id = "social_smoke"
+
+[corpus]
+path = "../tests/fixtures/social/corpus.jsonl"
+source_type = "social_document"
+id_fields = ["doc_id", "study_id", "id"]
+title_fields = ["title"]
+text_fields = ["abstract", "summary", "body_text", "text"]
+date_fields = ["publication_date", "date", "year"]
+slice_fields = ["period", "year"]
+role_fields = ["role", "inclusion_decision"]
+accepted_roles = ["core", "support"]
+cutoff_date = "2026-03-31"
+missing_date_policy = "keep"
+
+[taxonomy]
+nodes_path = "../tests/fixtures/social/taxonomy_nodes.json"
+assignments_path = "../tests/fixtures/social/assignments.jsonl"
+node_id_fields = ["node_id", "id"]
+node_label_fields = ["canonical_label", "label", "theme"]
+node_dimension_fields = ["dimension", "dimension_id"]
+node_parent_fields = ["parent_id"]
+node_definition_fields = ["definition", "description"]
+
+[taxonomy.dimensions.social_issues]
+display_name = "Social Issues"
+definition = "Problems or public concerns being analyzed."
+
+[taxonomy.dimensions.actors]
+display_name = "Actors"
+definition = "Institutions, platforms, communities, and groups."
+
+[taxonomy.dimensions.mechanisms]
+display_name = "Mechanisms"
+definition = "Explanatory social, behavioral, institutional, or communication mechanisms."
+
+[taxonomy.dimensions.interventions]
+display_name = "Interventions"
+definition = "Policy instruments, platform interventions, program designs, or governance tools."
+
+[taxonomy.dimensions.measurement_strategies]
+display_name = "Measurement Strategies"
+definition = "Operationalizations, survey designs, audit methods, experiments, and metrics."
+
+[taxonomy.dimensions.contexts]
+display_name = "Contexts"
+definition = "Countries, platforms, institutions, demographic groups, or settings."
+
+[taxonomy.dimensions.outcomes]
+display_name = "Outcomes"
+definition = "Social, behavioral, political, economic, or institutional outcomes."
+
+[taxonomy.dimensions.public_frames]
+display_name = "Public Frames"
+definition = "Narratives, discourses, and issue framings."
+
+[graph]
+entity_dimensions = ["mechanisms", "interventions", "measurement_strategies", "public_frames"]
+entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame"]
+strong_edge_types = ["extends", "improves", "replaces", "adapts"]
+method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame", "governance", "audit", "moderation"]
+min_entity_mentions = 1
+max_entities_per_document = 12
+
+[graph.entity_patterns]
+intervention = ["inoculation intervention", "community moderation", "platform labeling"]
+policy_instrument = ["transparency mandate", "algorithmic audit"]
+measurement_strategy = ["network audit", "survey experiment"]
+public_frame = ["platform governance frame", "individual responsibility frame"]
+
+[graph.edge_cues]
+extends = ["extends", "adds", "combines"]
+improves = ["improves", "increases", "reduces"]
+adapts = ["adapts", "transfers", "applies to"]
+replaces = ["replaces", "shifts from", "instead of"]
+uses_component = ["uses", "borrows", "integrates"]
+compares = ["compares", "relative to"]
+
+[output]
+root = "../examples/social_smoke_output"
+

@@ -1,0 +1,4 @@
+{"paper_id":"P1","title":"ReAct Agents for Tool Use","abstract":"ReAct combines reasoning and acting for tool use. It exposes a limitation in static prompting for interactive tasks.","published":"2024-01-10","chronology_slice":"2024-Q1","benchmark_role":"core"}
+{"paper_id":"P2","title":"Memory-Augmented Agent Improves ReAct","abstract":"Memory-Augmented Agent builds on ReAct and improves long-horizon tool use by adding episodic memory. The challenge is retaining task state across steps.","published":"2025-02-12","chronology_slice":"2025-Q1","benchmark_role":"core"}
+{"paper_id":"P3","title":"AgentBench Evaluation Protocol","abstract":"AgentBench compares ReAct and Memory-Augmented Agent on tool-use benchmarks. The protocol evaluates planning, execution, and recovery failures.","published":"2025-06-01","chronology_slice":"2025-Q2","benchmark_role":"support"}
+

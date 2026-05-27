@@ -1,0 +1,56 @@
+[project]
+name = "EvoTaxa Scientific Research Pilot"
+domain_id = "llm_agent"
+run_id = "science_smoke"
+
+[corpus]
+path = "../tests/fixtures/science/corpus.jsonl"
+source_type = "paper"
+id_fields = ["paper_id", "doc_id", "id"]
+title_fields = ["title"]
+text_fields = ["abstract", "body_text", "full_text"]
+date_fields = ["published", "published_at", "year"]
+slice_fields = ["chronology_slice", "year"]
+role_fields = ["benchmark_role", "role"]
+accepted_roles = ["core", "support"]
+cutoff_date = "2026-03-31"
+missing_date_policy = "drop"
+
+[taxonomy]
+nodes_path = "../tests/fixtures/science/taxonomy_nodes.json"
+previous_nodes_path = "../tests/fixtures/science/taxonomy_nodes.previous.json"
+assignments_path = "../tests/fixtures/science/assignments.jsonl"
+node_id_fields = ["node_id", "id"]
+node_label_fields = ["canonical_label", "label", "display_name"]
+node_dimension_fields = ["dimension", "dimension_id"]
+node_parent_fields = ["parent_id"]
+node_definition_fields = ["definition", "description"]
+
+[taxonomy.dimensions.methodologies]
+display_name = "Methodologies"
+definition = "Algorithms, architectures, training recipes, agent loops, and retrieval strategies."
+
+[taxonomy.dimensions.evaluation_methods]
+display_name = "Evaluation Methods"
+definition = "Evaluation protocols, benchmark methods, metrics, and stress tests."
+
+[graph]
+entity_dimensions = ["methodologies", "evaluation_methods"]
+entity_types = ["method", "evaluation_protocol", "mechanism"]
+strong_edge_types = ["extends", "improves", "replaces", "adapts"]
+min_entity_mentions = 1
+max_entities_per_document = 10
+
+[graph.entity_patterns]
+method = ["ReAct", "Toolformer", "GraphRAG", "Memory-Augmented Agent"]
+evaluation_protocol = ["AgentBench", "ToolEval"]
+
+[graph.edge_cues]
+extends = ["extends", "builds on", "augments"]
+improves = ["improves", "outperforms", "reduces"]
+adapts = ["adapts", "transfers"]
+replaces = ["replaces", "instead of"]
+
+[output]
+root = "../examples/science_smoke_output"
+

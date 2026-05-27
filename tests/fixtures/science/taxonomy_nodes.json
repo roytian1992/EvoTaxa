@@ -1,0 +1,6 @@
+[
+  {"node_id":"methodologies__agent_loops","dimension":"methodologies","canonical_label":"agent loops","definition":"Agent reasoning and acting loops."},
+  {"node_id":"methodologies__memory_agents","dimension":"methodologies","canonical_label":"memory agents","parent_id":"methodologies__agent_loops","definition":"Agents with persistent or episodic memory."},
+  {"node_id":"evaluation__tool_use","dimension":"evaluation_methods","canonical_label":"tool-use evaluation","definition":"Evaluation protocols for tool-use systems."}
+]
+

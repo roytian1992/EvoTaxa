@@ -1,0 +1,7 @@
+[
+  {"node_id":"issues__misinformation","dimension":"social_issues","canonical_label":"misinformation","definition":"False or misleading information in public communication."},
+  {"node_id":"interventions__labeling","dimension":"interventions","canonical_label":"platform labeling","definition":"Labels or warnings attached to content."},
+  {"node_id":"mechanisms__inoculation","dimension":"mechanisms","canonical_label":"inoculation intervention","definition":"Prebunking or resilience-building mechanisms."},
+  {"node_id":"measurement__algorithmic_audit","dimension":"measurement_strategies","canonical_label":"algorithmic audit","definition":"Auditing platform algorithms and governance systems."}
+]
+
