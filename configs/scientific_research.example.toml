@@ -45,6 +45,8 @@ entity_types = ["method", "evaluation_protocol", "mechanism"]
 strong_edge_types = ["extends", "improves", "replaces", "adapts"]
 min_entity_mentions = 1
 max_entities_per_document = 10
+min_entity_quality = 0.42
+entity_denylist = ["related work", "this paper"]
 
 [graph.entity_patterns]
 method = ["ReAct", "Toolformer", "GraphRAG", "Memory-Augmented Agent"]

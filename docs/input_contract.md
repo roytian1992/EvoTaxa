@@ -117,6 +117,20 @@ Use `[graph.entity_aliases]` to keep evolution graph entities from fragmenting a
 
 EvoTaxa writes both `graph/method_aliases.jsonl` and `graph/entity_linking_report.jsonl` so merges are auditable.
 
+## Entity Quality
+
+Entity quality filtering runs after alias canonicalization and before edge construction. Low-quality entities are written to `graph/entity_quality_report.jsonl` and do not enter graph edge construction.
+
+Useful config keys:
+
+```toml
+[graph]
+min_entity_quality = 0.42
+entity_allowlist = ["ReAct", "platform labeling"]
+entity_denylist = ["this paper", "it addresses the problem of"]
+generic_entity_phrases = ["this", "that", "paper", "study", "problem", "challenge"]
+```
+
 ## LLM Configuration
 
 EvoTaxa can run without an LLM. In that mode it uses deterministic fallback logic and still writes all artifacts.

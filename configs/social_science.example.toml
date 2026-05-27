@@ -69,6 +69,9 @@ strong_edge_types = ["extends", "improves", "replaces", "adapts"]
 method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame", "governance", "audit", "moderation"]
 min_entity_mentions = 1
 max_entities_per_document = 12
+min_entity_quality = 0.42
+entity_denylist = ["it addresses the problem of", "content labeling intervention content labeling"]
+generic_entity_phrases = ["this", "that", "it", "study", "paper", "problem", "challenge", "result", "section", "figure", "table"]
 
 [graph.entity_patterns]
 intervention = ["inoculation intervention", "community moderation", "platform labeling", "content labeling"]

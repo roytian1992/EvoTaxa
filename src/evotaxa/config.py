@@ -93,6 +93,29 @@ class GraphConfig:
     max_entities_per_document: int = 12
     max_edge_candidates_per_entity: int = 24
     alias_similarity_threshold: float = 0.86
+    min_entity_quality: float = 0.42
+    entity_allowlist: list[str] = field(default_factory=list)
+    entity_denylist: list[str] = field(default_factory=list)
+    generic_entity_phrases: list[str] = field(default_factory=lambda: [
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "we",
+        "paper",
+        "study",
+        "approach",
+        "method",
+        "system",
+        "framework",
+        "problem",
+        "challenge",
+        "result",
+        "section",
+        "figure",
+        "table",
+    ])
 
 
 @dataclass
@@ -260,6 +283,10 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
         alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
+        min_entity_quality=float(graph_raw.get("min_entity_quality") or 0.42),
+        entity_allowlist=_list(graph_raw, "entity_allowlist", []),
+        entity_denylist=_list(graph_raw, "entity_denylist", []),
+        generic_entity_phrases=_list(graph_raw, "generic_entity_phrases", GraphConfig().generic_entity_phrases),
     )
 
     return EvoTaxaConfig(
