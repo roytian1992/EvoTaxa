@@ -132,3 +132,5 @@ enabled_tasks = []
 
 `enabled_tasks = []` means the config is LLM-ready but will not call the model by default.
 Use `enabled_tasks = ["*"]` only when every LLM-backed task may call the configured server.
+
+`run-full` writes `audit/llm_cache.jsonl` by default. Repeated prompts reuse this cache, which makes local GLM experiments reproducible and cheaper to resume. LLM outputs are schema-checked before they can modify edge evidence or apply taxonomy expansion candidates.

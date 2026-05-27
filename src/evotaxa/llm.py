@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from evotaxa.config import LLMConfig
+from evotaxa.io import iter_jsonl, write_jsonl
 
 
 @dataclass
@@ -19,6 +22,9 @@ class LLMRecord:
     prompt: str
     output: dict[str, Any]
     error: str = ""
+    cache_key: str = ""
+    cache_hit: bool = False
+    schema_valid: bool = True
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -29,6 +35,9 @@ class LLMRecord:
             "prompt": self.prompt,
             "output": self.output,
             "error": self.error,
+            "cache_key": self.cache_key,
+            "cache_hit": self.cache_hit,
+            "schema_valid": self.schema_valid,
         }
 
 
@@ -49,6 +58,7 @@ class DeterministicLLMClient(LLMClient):
             used_model=False,
             prompt=prompt,
             output=fallback,
+            cache_key=_cache_key("deterministic", "fallback", task, prompt),
         )
 
 
@@ -56,8 +66,29 @@ class OpenAICompatJSONClient(LLMClient):
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
         self.api_key = config.api_key or os.environ.get(config.api_key_env, "")
+        self.cache: dict[str, LLMRecord] = {}
+        if config.cache_path and config.cache_path.exists():
+            for row in iter_jsonl(config.cache_path):
+                key = str(row.get("cache_key") or "")
+                if key:
+                    self.cache[key] = _record_from_row(row)
 
     def complete_json(self, *, task: str, prompt: str, fallback: dict[str, Any]) -> LLMRecord:
+        key = _cache_key(self.config.provider, self.config.model, task, prompt)
+        if key in self.cache:
+            cached = self.cache[key]
+            return LLMRecord(
+                task=cached.task,
+                provider=cached.provider,
+                model=cached.model,
+                used_model=cached.used_model,
+                prompt=prompt,
+                output=cached.output,
+                error=cached.error,
+                cache_key=key,
+                cache_hit=True,
+                schema_valid=cached.schema_valid,
+            )
         enabled_tasks = set(self.config.enabled_tasks)
         if not enabled_tasks:
             return LLMRecord(
@@ -68,6 +99,7 @@ class OpenAICompatJSONClient(LLMClient):
                 prompt=prompt,
                 output=fallback,
                 error="No LLM tasks enabled.",
+                cache_key=key,
             )
         if "*" not in enabled_tasks and task not in enabled_tasks:
             return LLMRecord(
@@ -78,6 +110,7 @@ class OpenAICompatJSONClient(LLMClient):
                 prompt=prompt,
                 output=fallback,
                 error="Task not enabled for model calls.",
+                cache_key=key,
             )
         if not self.api_key:
             return LLMRecord(
@@ -88,6 +121,7 @@ class OpenAICompatJSONClient(LLMClient):
                 prompt=prompt,
                 output=fallback,
                 error=f"Missing API key env: {self.config.api_key_env}",
+                cache_key=key,
             )
 
         base_url = self.config.base_url.rstrip("/") or "https://api.openai.com/v1"
@@ -110,29 +144,47 @@ class OpenAICompatJSONClient(LLMClient):
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-                raw = json.loads(response.read().decode("utf-8"))
-            content = raw["choices"][0]["message"]["content"]
-            output = json.loads(content)
-            return LLMRecord(
-                task=task,
-                provider=self.config.provider,
-                model=self.config.model,
-                used_model=True,
-                prompt=prompt,
-                output=output,
-            )
-        except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError) as exc:
-            return LLMRecord(
+        last_error = ""
+        for _ in range(max(1, self.config.max_retries)):
+            try:
+                with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
+                    raw = json.loads(response.read().decode("utf-8"))
+                content = raw["choices"][0]["message"]["content"]
+                output = json.loads(content)
+                schema_valid = _schema_valid(task, output)
+                record = LLMRecord(
+                    task=task,
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    used_model=True,
+                    prompt=prompt,
+                    output=output if schema_valid else fallback,
+                    error="" if schema_valid else "LLM output failed schema validation.",
+                    cache_key=key,
+                    schema_valid=schema_valid,
+                )
+                self._store(record)
+                return record
+            except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError) as exc:
+                last_error = str(exc)
+        return LLMRecord(
                 task=task,
                 provider=self.config.provider,
                 model=self.config.model,
                 used_model=False,
                 prompt=prompt,
                 output=fallback,
-                error=str(exc),
+                error=last_error,
+                cache_key=key,
             )
+
+    def _store(self, record: LLMRecord) -> None:
+        self.cache[record.cache_key] = record
+        if not self.config.cache_path:
+            return
+        path = Path(self.config.cache_path)
+        rows = [item.to_record() for item in self.cache.values()]
+        write_jsonl(path, rows)
 
 
 def build_llm_client(config: LLMConfig) -> LLMClient:
@@ -151,6 +203,7 @@ def judge_taxonomy_candidate(
         "accept": bool(candidate.get("support_documents")),
         "confidence": min(0.9, float(candidate.get("trigger_score") or 0.0) + 0.2),
         "rationale": candidate.get("reason") or "Deterministic fallback based on trigger score and support.",
+        "suggested_label": candidate.get("proposed_label") or "",
     }
     prompt = (
         "Judge whether the following taxonomy expansion candidate is valid.\n"
@@ -184,3 +237,37 @@ def judge_edge_evidence(
         "Return JSON with edge_type, confidence, bottleneck, mechanism, tradeoff, and rationale."
     )
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
+
+
+def _cache_key(provider: str, model: str, task: str, prompt: str) -> str:
+    payload = json.dumps(
+        {"provider": provider, "model": model, "task": task, "prompt": prompt},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _schema_valid(task: str, output: dict[str, Any]) -> bool:
+    if not isinstance(output, dict):
+        return False
+    if task == "taxonomy_candidate_judge":
+        return "accept" in output and "confidence" in output
+    if task == "edge_evidence_judge":
+        return "edge_type" in output and "confidence" in output
+    return True
+
+
+def _record_from_row(row: dict[str, Any]) -> LLMRecord:
+    return LLMRecord(
+        task=str(row.get("task") or ""),
+        provider=str(row.get("provider") or ""),
+        model=str(row.get("model") or ""),
+        used_model=bool(row.get("used_model")),
+        prompt=str(row.get("prompt") or ""),
+        output=row.get("output") if isinstance(row.get("output"), dict) else {},
+        error=str(row.get("error") or ""),
+        cache_key=str(row.get("cache_key") or ""),
+        cache_hit=bool(row.get("cache_hit")),
+        schema_valid=bool(row.get("schema_valid", True)),
+    )

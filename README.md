@@ -4,7 +4,7 @@ EvoTaxa is a config-driven framework for taxonomy-guided evolution modeling.
 
 The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, searches local lineage chains, and emits forecast/social-analysis hooks.
 
-`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging, taxonomy-graph feedback, and forecast-hook scoring.
+`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, taxonomy-graph feedback, and forecast-hook scoring.
 
 ## Why Config-Driven
 
@@ -69,10 +69,12 @@ Each run writes:
     manifest.json
   taxonomy/
     taxonomy_nodes.enriched.json
+    taxonomy_nodes.expanded.json
     taxonomy_events.jsonl
     taxonomy_induction_audit.jsonl
     expansion_trigger_scores.jsonl
     expansion_candidates.jsonl
+    expansion_application_report.jsonl
     node_quality_scores.jsonl
     taxonomy_judge_report.json
     document_assignments.normalized.jsonl
@@ -94,6 +96,7 @@ Each run writes:
     taxonomy_graph_feedback.jsonl
   audit/
     llm_judge_records.jsonl
+    llm_cache.jsonl
     unverified_edges.jsonl
     low_confidence_nodes.jsonl
   manifest.json

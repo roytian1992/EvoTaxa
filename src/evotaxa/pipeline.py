@@ -9,7 +9,13 @@ from evotaxa.config import EvoTaxaConfig, load_config
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
 from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities
 from evotaxa.hooks import build_forecast_hooks, build_social_analysis_hooks
-from evotaxa.induction import build_induction_assignments, induce_initial_taxonomy, propose_expansion_candidates, score_expansion_triggers
+from evotaxa.induction import (
+    apply_expansion_candidates,
+    build_induction_assignments,
+    induce_initial_taxonomy,
+    propose_expansion_candidates,
+    score_expansion_triggers,
+)
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
 from evotaxa.llm import build_llm_client, judge_edge_evidence, judge_taxonomy_candidate
@@ -30,6 +36,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     config = load_config(config_or_path) if not isinstance(config_or_path, EvoTaxaConfig) else config_or_path
     output_root = Path(config.output.root)
     output_root.mkdir(parents=True, exist_ok=True)
+    if full and config.llm.cache_path is None:
+        config.llm.cache_path = output_root / "audit" / "llm_cache.jsonl"
 
     docs, corpus_manifest = load_documents(config)
     current_nodes, taxonomy_manifest = load_taxonomy_nodes(config)
@@ -63,11 +71,33 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
 
     llm_client = build_llm_client(config.llm)
     llm_records: list[Any] = []
+    taxonomy_judgements: dict[str, dict[str, Any]] = {}
     if full and expansion_candidates:
         doc_map = {doc.doc_id: doc for doc in docs}
         for candidate in expansion_candidates[:20]:
             context = "\n\n".join(doc_map[doc_id].full_text for doc_id in candidate.get("support_documents", []) if doc_id in doc_map)
-            llm_records.append(judge_taxonomy_candidate(llm_client, candidate=candidate, context=context))
+            record = judge_taxonomy_candidate(llm_client, candidate=candidate, context=context)
+            llm_records.append(record)
+            taxonomy_judgements[str(candidate.get("candidate_id") or "")] = record.output
+
+    expanded_nodes = nodes
+    expanded_assignments = assignments
+    expansion_application_report: list[dict[str, Any]] = []
+    if full and expansion_candidates:
+        expanded_nodes, expanded_assignments, expansion_application_report = apply_expansion_candidates(
+            nodes,
+            assignments,
+            expansion_candidates,
+            taxonomy_judgements,
+            config.taxonomy,
+        )
+        if any(row.get("status") == "applied" for row in expansion_application_report):
+            nodes = attach_node_support(docs, expanded_nodes, expanded_assignments)
+            assignments = expanded_assignments
+            enriched_nodes = enrich_taxonomy_nodes(docs, nodes)
+            node_quality = judge_taxonomy_quality(docs, nodes)
+            entities, mentions = extract_entities(docs, assignments, config.graph)
+            taxonomy_events = [*taxonomy_events, *_expansion_application_events(expansion_application_report)]
 
     edges = build_edges(docs, entities, mentions, config.graph)
     if full and edges:
@@ -98,13 +128,16 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "corpus" / "documents.normalized.jsonl", (doc.to_record() for doc in docs))
     write_json(output_root / "corpus" / "manifest.json", corpus_manifest)
     write_json(output_root / "taxonomy" / "taxonomy_nodes.enriched.json", enriched_nodes)
+    write_json(output_root / "taxonomy" / "taxonomy_nodes.expanded.json", [node.to_record() for node in nodes])
     write_jsonl(output_root / "taxonomy" / "taxonomy_events.jsonl", taxonomy_events)
     write_jsonl(output_root / "taxonomy" / "node_quality_scores.jsonl", (row.to_record() for row in node_quality))
     write_json(output_root / "taxonomy" / "taxonomy_judge_report.json", _taxonomy_report(node_quality))
     write_jsonl(output_root / "taxonomy" / "document_assignments.normalized.jsonl", _assignment_rows(assignments))
+    write_jsonl(output_root / "taxonomy" / "document_assignments.expanded.jsonl", _assignment_rows(assignments))
     write_jsonl(output_root / "taxonomy" / "taxonomy_induction_audit.jsonl", induction_audit)
     write_jsonl(output_root / "taxonomy" / "expansion_trigger_scores.jsonl", (row.to_record() for row in expansion_signals))
     write_jsonl(output_root / "taxonomy" / "expansion_candidates.jsonl", expansion_candidates)
+    write_jsonl(output_root / "taxonomy" / "expansion_application_report.jsonl", expansion_application_report)
 
     write_jsonl(output_root / "graph" / "method_registry.jsonl", (entity.to_record() for entity in entities))
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
@@ -145,6 +178,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "taxonomy_events": len(taxonomy_events),
             "expansion_signals": len(expansion_signals),
             "expansion_candidates": len(expansion_candidates),
+            "applied_expansions": sum(1 for row in expansion_application_report if row.get("status") == "applied"),
             "entities": len(entities),
             "mentions": len(mentions),
             "paper_level_edges": len(edges),
@@ -162,6 +196,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "node_quality_scores": "taxonomy/node_quality_scores.jsonl",
             "expansion_trigger_scores": "taxonomy/expansion_trigger_scores.jsonl",
             "expansion_candidates": "taxonomy/expansion_candidates.jsonl",
+            "expansion_application_report": "taxonomy/expansion_application_report.jsonl",
+            "expanded_taxonomy_nodes": "taxonomy/taxonomy_nodes.expanded.json",
             "method_registry": "graph/method_registry.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
@@ -196,6 +232,27 @@ def _apply_edge_judgement(edge: Any, judgement: dict[str, Any]) -> Any:
         evidence["judge_rationale"] = str(judgement["rationale"])
     edge.evidence = evidence
     return edge
+
+
+def _expansion_application_events(report: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for row in report:
+        if row.get("status") != "applied":
+            continue
+        events.append(
+            {
+                "event_id": f"applied_expansion__{row['new_node_id']}",
+                "event_type": "birth",
+                "time_slice": "",
+                "source_node_ids": [row.get("parent_node_id") or ""],
+                "target_node_ids": [row["new_node_id"]],
+                "support_documents": row.get("support_documents") or [],
+                "reason": "Expansion candidate accepted by judge and applied to taxonomy snapshot.",
+                "confidence": row.get("confidence", 0.0),
+                "source_candidate_id": row.get("candidate_id"),
+            }
+        )
+    return events
 
 
 def _assignment_rows(assignments: dict[str, list[str]]) -> list[dict[str, Any]]:

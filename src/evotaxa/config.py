@@ -57,9 +57,11 @@ class TaxonomyConfig:
     max_induced_nodes_per_dimension: int = 8
     min_cluster_documents: int = 2
     expansion_threshold: float = 0.55
+    expansion_acceptance_threshold: float = 0.6
     width_threshold: float = 0.65
     depth_threshold: float = 0.65
     max_expansion_candidates: int = 50
+    max_applied_expansions: int = 20
 
 
 @dataclass
@@ -111,6 +113,8 @@ class LLMConfig:
     api_key_env: str = "OPENAI_API_KEY"
     base_url: str = ""
     enabled_tasks: list[str] = field(default_factory=list)
+    cache_path: Path | None = None
+    max_retries: int = 1
     timeout_seconds: int = 120
     temperature: float = 0.0
 
@@ -229,9 +233,11 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         max_induced_nodes_per_dimension=int(taxonomy_raw.get("max_induced_nodes_per_dimension") or 8),
         min_cluster_documents=int(taxonomy_raw.get("min_cluster_documents") or 2),
         expansion_threshold=float(taxonomy_raw.get("expansion_threshold") or 0.55),
+        expansion_acceptance_threshold=float(taxonomy_raw.get("expansion_acceptance_threshold") or 0.6),
         width_threshold=float(taxonomy_raw.get("width_threshold") or 0.65),
         depth_threshold=float(taxonomy_raw.get("depth_threshold") or 0.65),
         max_expansion_candidates=int(taxonomy_raw.get("max_expansion_candidates") or 50),
+        max_applied_expansions=int(taxonomy_raw.get("max_applied_expansions") or 20),
     )
 
     graph = GraphConfig(
@@ -266,6 +272,8 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
             api_key_env=str(llm_raw.get("api_key_env") or "OPENAI_API_KEY"),
             base_url=str(llm_raw.get("base_url") or ""),
             enabled_tasks=_list(llm_raw, "enabled_tasks", []),
+            cache_path=_resolve_path(base, llm_raw.get("cache_path")),
+            max_retries=int(llm_raw.get("max_retries") or 1),
             timeout_seconds=int(llm_raw.get("timeout_seconds") or 120),
             temperature=float(llm_raw.get("temperature") or 0.0),
         ),

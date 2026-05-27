@@ -34,7 +34,10 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     output_root = Path(manifest["output_root"])
     assert manifest["mode"] == "full"
     assert manifest["counts"]["expansion_signals"] >= 1
+    assert manifest["counts"]["applied_expansions"] >= 1
     assert (output_root / "taxonomy" / "expansion_trigger_scores.jsonl").exists()
+    assert (output_root / "taxonomy" / "taxonomy_nodes.expanded.json").exists()
+    assert (output_root / "taxonomy" / "expansion_application_report.jsonl").exists()
     assert (output_root / "feedback" / "taxonomy_graph_feedback.jsonl").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
 
@@ -53,6 +56,7 @@ def test_empty_enabled_tasks_does_not_call_llm() -> None:
     record = client.complete_json(task="edge_evidence_judge", prompt="{}", fallback={"ok": True})
     assert record.used_model is False
     assert record.error == "No LLM tasks enabled."
+    assert record.cache_key
 
 
 def test_full_pipeline_can_induce_taxonomy_without_node_file() -> None:

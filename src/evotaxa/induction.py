@@ -204,6 +204,95 @@ def build_induction_assignments(
     return {doc_id: sorted(node_ids) for doc_id, node_ids in sorted(merged.items())}
 
 
+def apply_expansion_candidates(
+    nodes: list[TaxonomyNode],
+    assignments: dict[str, list[str]],
+    candidates: list[dict[str, Any]],
+    judge_outputs: dict[str, dict[str, Any]],
+    config: TaxonomyConfig,
+) -> tuple[list[TaxonomyNode], dict[str, list[str]], list[dict[str, Any]]]:
+    expanded_nodes = list(nodes)
+    node_ids = {node.node_id for node in expanded_nodes}
+    labels_by_parent = {(node.parent_id, node.canonical_label.lower()) for node in expanded_nodes}
+    expanded_assignments: dict[str, set[str]] = {doc_id: set(node_ids_) for doc_id, node_ids_ in assignments.items()}
+    report: list[dict[str, Any]] = []
+    applied = 0
+
+    ranked = sorted(candidates, key=lambda row: (-float(row.get("trigger_score") or 0.0), row.get("candidate_id", "")))
+    for candidate in ranked:
+        if applied >= config.max_applied_expansions:
+            break
+        candidate_id = str(candidate.get("candidate_id") or "")
+        judgement = judge_outputs.get(candidate_id) or {}
+        accept = bool(judgement.get("accept", bool(candidate.get("support_documents"))))
+        try:
+            confidence = float(judgement.get("confidence", candidate.get("trigger_score") or 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if not accept or confidence < config.expansion_acceptance_threshold:
+            report.append(
+                {
+                    "candidate_id": candidate_id,
+                    "status": "rejected",
+                    "confidence": round(confidence, 3),
+                    "reason": judgement.get("rationale") or "Below acceptance threshold.",
+                }
+            )
+            continue
+
+        label = str(judgement.get("suggested_label") or candidate.get("proposed_label") or "").strip()
+        if not label:
+            report.append({"candidate_id": candidate_id, "status": "rejected", "reason": "Missing label."})
+            continue
+        parent_id = str(candidate.get("parent_node_id") or "")
+        if (parent_id, label.lower()) in labels_by_parent:
+            report.append({"candidate_id": candidate_id, "status": "deduplicated", "reason": "Sibling label already exists."})
+            continue
+
+        base_node_id = f"{slugify(candidate.get('dimension') or 'taxonomy')}__{slugify(label)}"
+        node_id = base_node_id
+        suffix = 2
+        while node_id in node_ids:
+            node_id = f"{base_node_id}_{suffix}"
+            suffix += 1
+        support_docs = sorted({str(doc_id) for doc_id in candidate.get("support_documents", []) if str(doc_id)})
+        expanded_nodes.append(
+            TaxonomyNode(
+                node_id=node_id,
+                dimension=str(candidate.get("dimension") or ""),
+                canonical_label=label,
+                parent_id=parent_id,
+                definition=f"Applied expansion candidate for {label}.",
+                support_documents=support_docs,
+                representative_documents=support_docs[:5],
+                raw={
+                    "source_candidate_id": candidate_id,
+                    "candidate_type": candidate.get("candidate_type"),
+                    "trigger_score": candidate.get("trigger_score"),
+                    "judge_confidence": round(confidence, 3),
+                },
+            )
+        )
+        node_ids.add(node_id)
+        labels_by_parent.add((parent_id, label.lower()))
+        for doc_id in support_docs:
+            expanded_assignments.setdefault(doc_id, set()).add(node_id)
+        report.append(
+            {
+                "candidate_id": candidate_id,
+                "status": "applied",
+                "new_node_id": node_id,
+                "parent_node_id": parent_id,
+                "label": label,
+                "confidence": round(confidence, 3),
+                "support_documents": support_docs,
+            }
+        )
+        applied += 1
+
+    return expanded_nodes, {doc_id: sorted(node_ids_) for doc_id, node_ids_ in sorted(expanded_assignments.items())}, report
+
+
 def _dimension_phrases(
     dim: DimensionSpec,
     global_phrases: list[str],
@@ -296,4 +385,3 @@ def _recommend_action(
     if uncertainty >= 0.7:
         return "assignment_review", "High assignment uncertainty."
     return "monitor", "No dominant expansion trigger."
-
