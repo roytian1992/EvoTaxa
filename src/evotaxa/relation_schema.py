@@ -155,8 +155,16 @@ def adapt_relation_schema(
     edge_evidence_audit: list[dict[str, Any]],
     config: GraphConfig,
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
-    adapted = {key: dict(value) for key, value in schema.items()}
-    report: list[dict[str, Any]] = []
+    candidates = propose_relation_schema_revisions(schema, edge_evidence_audit, config)
+    return apply_relation_schema_revisions(schema, candidates, max_revisions=0, max_relation_types=config.max_relation_types)
+
+
+def propose_relation_schema_revisions(
+    schema: dict[str, dict[str, Any]],
+    edge_evidence_audit: list[dict[str, Any]],
+    config: GraphConfig,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in edge_evidence_audit:
         by_type[str(row.get("edge_type") or "background")].append(row)
@@ -167,28 +175,73 @@ def adapt_relation_schema(
             continue
         verified_rate = sum(1 for row in rows if int(row.get("verified_quote_count") or 0) > 0) / support
         mean_confidence = sum(float(row.get("confidence") or 0.0) for row in rows) / support
-        spec = adapted.setdefault(edge_type, {})
-        spec["observed_support"] = support
-        spec["observed_verified_rate"] = round(verified_rate, 3)
-        spec["observed_mean_confidence"] = round(mean_confidence, 3)
-        if spec.get("schema_source") not in {"fixed", "inferred"}:
-            spec["schema_source"] = "adaptive"
-        report.append(
+        candidates.append(
             {
+                "candidate_id": f"relation_observation__{slugify(edge_type)}",
+                "schema_family": "relation_schema",
+                "schema_name": edge_type,
+                "revision_type": "update_observed_stats",
                 "edge_type": edge_type,
-                "status": "updated",
                 "support": support,
                 "verified_rate": round(verified_rate, 3),
                 "mean_confidence": round(mean_confidence, 3),
+                "confidence": round(min(0.95, 0.45 + 0.08 * support + 0.25 * verified_rate + 0.15 * mean_confidence), 3),
+                "reason": "Relation type has enough observed edge support to persist run-level reliability statistics.",
             }
         )
 
     missing_counts = Counter(str(row.get("edge_type") or "") for row in edge_evidence_audit if row.get("status") == "candidate")
     for edge_type, count in missing_counts.items():
-        if count >= config.relation_schema_adaptation_min_support and edge_type in adapted:
-            adapted[edge_type]["needs_review"] = True
-            report.append({"edge_type": edge_type, "status": "needs_review", "candidate_edges": count})
-    return _limit_schema(adapted, config.max_relation_types), report
+        if count >= config.relation_schema_adaptation_min_support and edge_type in schema:
+            candidates.append(
+                {
+                    "candidate_id": f"relation_review__{slugify(edge_type)}",
+                    "schema_family": "relation_schema",
+                    "schema_name": edge_type,
+                    "revision_type": "mark_needs_review",
+                    "edge_type": edge_type,
+                    "support": count,
+                    "confidence": round(min(0.9, 0.45 + 0.08 * count), 3),
+                    "reason": "Relation type repeatedly produced candidate edges rather than trusted edges.",
+                }
+            )
+    return sorted(candidates, key=lambda row: (-float(row.get("confidence") or 0.0), row.get("candidate_id", "")))
+
+
+def apply_relation_schema_revisions(
+    schema: dict[str, dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    *,
+    max_revisions: int,
+    max_relation_types: int,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    adapted = {key: dict(value) for key, value in schema.items()}
+    report: list[dict[str, Any]] = []
+    applied = 0
+    for candidate in candidates:
+        if max_revisions > 0 and applied >= max_revisions:
+            report.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "max_schema_revisions_reached"})
+            continue
+        edge_type = str(candidate.get("edge_type") or candidate.get("schema_name") or "")
+        if not edge_type:
+            report.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "missing_edge_type"})
+            continue
+        spec = adapted.setdefault(edge_type, {})
+        revision_type = str(candidate.get("revision_type") or "")
+        if revision_type == "update_observed_stats":
+            spec["observed_support"] = int(candidate.get("support") or 0)
+            spec["observed_verified_rate"] = float(candidate.get("verified_rate") or 0.0)
+            spec["observed_mean_confidence"] = float(candidate.get("mean_confidence") or 0.0)
+        elif revision_type == "mark_needs_review":
+            spec["needs_review"] = True
+        else:
+            report.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "unsupported_revision_type"})
+            continue
+        if spec.get("schema_source") not in {"fixed", "inferred"}:
+            spec["schema_source"] = "adaptive"
+        applied += 1
+        report.append({**candidate, "status": "applied", "decision": "promoted"})
+    return _limit_schema(adapted, max_relation_types), report
 
 
 def relation_schema_prompt(schema: dict[str, dict[str, Any]]) -> str:

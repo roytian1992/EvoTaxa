@@ -117,6 +117,7 @@ Each run writes:
     evidence_schema.inferred.json
     evidence_schema.final.json
     evidence_schema.revisions.jsonl
+    schema_revision_candidates.jsonl
     schema_reports.jsonl
   graph/
     method_registry.jsonl
@@ -174,9 +175,9 @@ EvoTaxa treats schema as a versioned artifact. `[schema]` supports:
 
 - `fixed`: use configured entity/relation/evidence contracts.
 - `inferred`: infer a domain schema from corpus samples before extraction.
-- `adaptive`: infer or load a schema, then revise it from entity filtering and edge evidence audit signals.
+- `adaptive`: infer or load a schema, propose revision candidates from entity filtering and edge evidence audit signals, then promote bounded revisions.
 
-The relation schema is injected into edge construction and LLM edge judging. The entity schema constrains quote-grounded entity extraction. The evidence schema defines which quote-backed slots are audited. Each run writes fixed, inferred, final, and revision artifacts under `schema/`.
+The relation schema is injected into edge construction and LLM edge judging. The entity schema constrains quote-grounded entity extraction. The evidence schema defines which quote-backed slots are audited. Each run writes fixed, inferred, final, candidate, and promoted revision artifacts under `schema/`.
 
 ## Edge Evidence
 

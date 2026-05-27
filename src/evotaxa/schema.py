@@ -10,7 +10,12 @@ from evotaxa.config import EvoTaxaConfig
 from evotaxa.io import read_json_or_jsonl, slugify
 from evotaxa.llm import LLMClient, infer_entity_evidence_schema, infer_relation_schema
 from evotaxa.models import Document, TaxonomyNode
-from evotaxa.relation_schema import adapt_relation_schema, fixed_relation_schema, normalize_relation_schema
+from evotaxa.relation_schema import (
+    apply_relation_schema_revisions,
+    fixed_relation_schema,
+    normalize_relation_schema,
+    propose_relation_schema_revisions,
+)
 
 
 DEFAULT_EVIDENCE_SCHEMA: dict[str, dict[str, Any]] = {
@@ -130,6 +135,10 @@ class SchemaBundle(dict):
     def inferred_evidence_schema(self) -> dict[str, dict[str, Any]]:
         return self["inferred_evidence_schema"]
 
+    @property
+    def revision_candidates(self) -> list[dict[str, Any]]:
+        return self["revision_candidates"]
+
 
 def resolve_initial_schema(
     config: EvoTaxaConfig,
@@ -204,6 +213,7 @@ def resolve_initial_schema(
         inferred_entity_schema=inferred_entity_schema,
         inferred_relation_schema=inferred_relation_schema,
         inferred_evidence_schema=inferred_evidence_schema,
+        revision_candidates=[],
     )
 
 
@@ -226,29 +236,81 @@ def adapt_schema_after_graph(
         inferred_entity_schema=deepcopy(bundle.inferred_entity_schema),
         inferred_relation_schema=deepcopy(bundle.inferred_relation_schema),
         inferred_evidence_schema=deepcopy(bundle.inferred_evidence_schema),
+        revision_candidates=list(bundle.revision_candidates),
     )
-    revisions: list[dict[str, Any]] = []
-
-    if config.schema.relation_schema_mode == "adaptive":
-        relation_schema, relation_report = adapt_relation_schema(adapted.relation_schema, edge_evidence_audit, config.graph)
-        adapted["relation_schema"] = relation_schema
-        revisions.extend(_revision_rows("relation_schema", relation_report))
-
-    if config.schema.entity_schema_mode == "adaptive":
-        entity_revisions = adapt_entity_schema(adapted.entity_schema, entity_quality_report, config.schema.schema_revision_min_support)
-        revisions.extend(entity_revisions)
-
-    if config.schema.evidence_schema_mode == "adaptive":
-        evidence_revisions = adapt_evidence_schema(adapted.evidence_schema, edge_evidence_audit, config.schema.schema_revision_min_support)
-        revisions.extend(evidence_revisions)
-
-    if config.schema.max_schema_revisions > 0:
-        revisions = revisions[: config.schema.max_schema_revisions]
-    for row in revisions:
-        row.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
-        row.setdefault("decision", "promoted")
+    candidates = propose_schema_revision_candidates(
+        adapted,
+        edge_evidence_audit=edge_evidence_audit,
+        entity_quality_report=entity_quality_report,
+        config=config,
+    )
+    revisions = promote_schema_revisions(adapted, candidates, config)
+    adapted["revision_candidates"].extend(candidates)
     adapted.reports.extend(revisions)
     return adapted, revisions
+
+
+def propose_schema_revision_candidates(
+    bundle: SchemaBundle,
+    *,
+    edge_evidence_audit: list[dict[str, Any]],
+    entity_quality_report: list[dict[str, Any]],
+    config: EvoTaxaConfig,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+
+    if config.schema.relation_schema_mode == "adaptive":
+        candidates.extend(propose_relation_schema_revisions(bundle.relation_schema, edge_evidence_audit, config.graph))
+
+    if config.schema.entity_schema_mode == "adaptive":
+        candidates.extend(propose_entity_schema_revisions(bundle.entity_schema, entity_quality_report, config.schema.schema_revision_min_support))
+
+    if config.schema.evidence_schema_mode == "adaptive":
+        candidates.extend(propose_evidence_schema_revisions(bundle.evidence_schema, edge_evidence_audit, config.schema.schema_revision_min_support))
+
+    for row in candidates:
+        row.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
+        row.setdefault("decision", "candidate")
+    return sorted(candidates, key=lambda row: (-float(row.get("confidence") or 0.0), row.get("candidate_id", "")))
+
+
+def promote_schema_revisions(
+    bundle: SchemaBundle,
+    candidates: list[dict[str, Any]],
+    config: EvoTaxaConfig,
+) -> list[dict[str, Any]]:
+    if config.schema.max_schema_revisions > 0:
+        promotable = candidates[: config.schema.max_schema_revisions]
+        overflow = candidates[config.schema.max_schema_revisions :]
+    else:
+        promotable = list(candidates)
+        overflow = []
+
+    relation_candidates = [row for row in promotable if row.get("schema_family") == "relation_schema"]
+    relation_schema, relation_report = apply_relation_schema_revisions(
+        bundle.relation_schema,
+        relation_candidates,
+        max_revisions=0,
+        max_relation_types=config.graph.max_relation_types,
+    )
+    bundle["relation_schema"] = relation_schema
+
+    revisions: list[dict[str, Any]] = list(relation_report)
+    for candidate in promotable:
+        family = candidate.get("schema_family")
+        if family == "entity_schema":
+            revisions.append(_apply_entity_schema_revision(bundle.entity_schema, candidate))
+        elif family == "evidence_schema":
+            revisions.append(_apply_evidence_schema_revision(bundle.evidence_schema, candidate))
+        elif family != "relation_schema":
+            revisions.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "unsupported_schema_family"})
+
+    for candidate in overflow:
+        revisions.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "max_schema_revisions_reached"})
+    for row in revisions:
+        row.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
+        row.setdefault("decision", "promoted" if row.get("status") == "applied" else row.get("decision", "rejected"))
+    return revisions
 
 
 def fixed_entity_schema(
@@ -351,7 +413,15 @@ def adapt_entity_schema(
     entity_quality_report: list[dict[str, Any]],
     min_support: int,
 ) -> list[dict[str, Any]]:
-    revisions: list[dict[str, Any]] = []
+    return [_apply_entity_schema_revision(entity_schema, candidate) for candidate in propose_entity_schema_revisions(entity_schema, entity_quality_report, min_support)]
+
+
+def propose_entity_schema_revisions(
+    entity_schema: dict[str, dict[str, Any]],
+    entity_quality_report: list[dict[str, Any]],
+    min_support: int,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in entity_quality_report:
         by_type[str(row.get("entity_type") or "entity")].append(row)
@@ -360,24 +430,30 @@ def adapt_entity_schema(
         if len(filtered) < min_support:
             continue
         reasons = Counter(reason for row in filtered for reason in row.get("reasons", []))
-        spec = entity_schema.setdefault(entity_type, _minimal_entity_schema(entity_type))
-        negative_examples = set(spec.get("negative_examples") or [])
-        negative_examples.update(str(row.get("canonical_name") or "") for row in filtered[:5] if row.get("canonical_name"))
-        spec["negative_examples"] = sorted(negative_examples)
-        spec["schema_source"] = "adaptive"
-        revisions.append(
+        candidates.append(
             {
+                "candidate_id": f"entity_boundary__{slugify(entity_type)}",
                 "schema_family": "entity_schema",
                 "schema_name": entity_type,
                 "revision_type": "tighten_boundary",
                 "support": len(filtered),
+                "negative_examples": [str(row.get("canonical_name") or "") for row in filtered[:5] if row.get("canonical_name")],
+                "confidence": round(min(0.9, 0.45 + 0.08 * len(filtered)), 3),
                 "reason": f"Filtered entity mentions suggest boundary issues: {dict(reasons)}",
             }
         )
-    return revisions
+    return candidates
 
 
 def adapt_evidence_schema(
+    evidence_schema: dict[str, dict[str, Any]],
+    edge_evidence_audit: list[dict[str, Any]],
+    min_support: int,
+) -> list[dict[str, Any]]:
+    return [_apply_evidence_schema_revision(evidence_schema, candidate) for candidate in propose_evidence_schema_revisions(evidence_schema, edge_evidence_audit, min_support)]
+
+
+def propose_evidence_schema_revisions(
     evidence_schema: dict[str, dict[str, Any]],
     edge_evidence_audit: list[dict[str, Any]],
     min_support: int,
@@ -390,22 +466,47 @@ def adapt_evidence_schema(
         for check in row.get("quote_checks") or []:
             if not check.get("verified"):
                 unverified[str(check.get("field") or "")] += 1
-    revisions: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for slot, count in sorted((missing + unverified).items()):
         if not slot or count < min_support or slot not in evidence_schema:
             continue
-        evidence_schema[slot]["needs_review"] = True
-        evidence_schema[slot]["schema_source"] = "adaptive"
-        revisions.append(
+        candidates.append(
             {
+                "candidate_id": f"evidence_review__{slugify(slot)}",
                 "schema_family": "evidence_schema",
                 "schema_name": slot,
                 "revision_type": "mark_needs_review",
                 "support": count,
+                "confidence": round(min(0.9, 0.45 + 0.06 * count), 3),
                 "reason": "Evidence slot repeatedly missing or failed quote validation.",
             }
         )
-    return revisions
+    return candidates
+
+
+def _apply_entity_schema_revision(entity_schema: dict[str, dict[str, Any]], candidate: dict[str, Any]) -> dict[str, Any]:
+    entity_type = str(candidate.get("schema_name") or "")
+    if not entity_type:
+        return {**candidate, "status": "rejected", "decision": "rejected", "reason": "missing_entity_type"}
+    spec = entity_schema.setdefault(entity_type, _minimal_entity_schema(entity_type))
+    if candidate.get("revision_type") != "tighten_boundary":
+        return {**candidate, "status": "rejected", "decision": "rejected", "reason": "unsupported_revision_type"}
+    negative_examples = set(spec.get("negative_examples") or [])
+    negative_examples.update(str(item) for item in candidate.get("negative_examples") or [] if str(item).strip())
+    spec["negative_examples"] = sorted(negative_examples)
+    spec["schema_source"] = "adaptive"
+    return {**candidate, "status": "applied", "decision": "promoted"}
+
+
+def _apply_evidence_schema_revision(evidence_schema: dict[str, dict[str, Any]], candidate: dict[str, Any]) -> dict[str, Any]:
+    slot = str(candidate.get("schema_name") or "")
+    if not slot or slot not in evidence_schema:
+        return {**candidate, "status": "rejected", "decision": "rejected", "reason": "missing_evidence_slot"}
+    if candidate.get("revision_type") != "mark_needs_review":
+        return {**candidate, "status": "rejected", "decision": "rejected", "reason": "unsupported_revision_type"}
+    evidence_schema[slot]["needs_review"] = True
+    evidence_schema[slot]["schema_source"] = "adaptive"
+    return {**candidate, "status": "applied", "decision": "promoted"}
 
 
 def _load_seed(path: Path | None) -> dict[str, Any]:

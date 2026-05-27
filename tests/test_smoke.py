@@ -7,7 +7,7 @@ from evotaxa.cli import main
 from evotaxa.config import load_config
 from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
-from evotaxa.llm import build_llm_client
+from evotaxa.llm import build_llm_client, judge_edge_evidence
 from evotaxa.models import Document, EvolutionEdge
 from evotaxa.pipeline import run_full, run_lite
 
@@ -64,6 +64,7 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "taxonomy" / "coevolution_iterations.jsonl").exists()
     assert (output_root / "schema" / "relation_schema.fixed.json").exists()
     assert (output_root / "schema" / "relation_schema.inferred.json").exists()
+    assert (output_root / "schema" / "schema_revision_candidates.jsonl").exists()
     assert (output_root / "schema" / "relation_schema.revisions.jsonl").exists()
     assert (output_root / "schema" / "entity_schema.fixed.json").exists()
     assert (output_root / "schema" / "entity_schema.inferred.json").exists()
@@ -106,7 +107,32 @@ def test_schema_cli_commands_write_artifacts() -> None:
     assert main(["adapt-schema", "--config", str(config_path), "--print-summary"]) == 0
     output_root = REPO_ROOT / "examples" / "social_smoke_output"
     assert (output_root / "schema" / "relation_schema.final.json").exists()
+    assert (output_root / "schema" / "schema_revision_candidates.jsonl").exists()
     assert (output_root / "schema" / "relation_schema.revisions.jsonl").exists()
+
+
+def test_dynamic_edge_judge_uses_schema_slots() -> None:
+    config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
+    client = build_llm_client(config.llm)
+    edge = {
+        "edge_type": "adapts",
+        "confidence": 0.7,
+        "evidence": {
+            "schema_slots": ["mechanism", "implementation_context"],
+            "mechanism": {"description": "Mechanism", "quote": "Toolformer adapts tool-use agents to API calls."},
+            "implementation_context": {"description": "Context", "quote": "API calls"},
+        },
+    }
+    record = judge_edge_evidence(
+        client,
+        edge=edge,
+        source_text="Toolformer adapts tool-use agents to API calls.",
+        target_text="Toolformer adapts tool-use agents to API calls.",
+        relation_schema={"adapts": {"evidence_slots": ["mechanism", "implementation_context"]}},
+        evidence_schema={"implementation_context": {"definition": "Implementation setting.", "required": True}},
+    )
+    assert set(record.output["evidence"]) == {"mechanism", "implementation_context"}
+    assert record.output["implementation_context"]["quote"] == "API calls"
 
 
 def test_empty_enabled_tasks_does_not_call_llm() -> None:

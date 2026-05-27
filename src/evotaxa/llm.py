@@ -221,24 +221,35 @@ def judge_edge_evidence(
     source_text: str,
     target_text: str,
     relation_schema: dict[str, Any] | None = None,
+    evidence_schema: dict[str, Any] | None = None,
 ) -> LLMRecord:
+    edge_type = str(edge.get("edge_type") or "")
+    relation_spec = (relation_schema or {}).get(edge_type) if isinstance(relation_schema, dict) else {}
+    evidence_slots = _edge_evidence_slots(edge=edge, relation_spec=relation_spec, evidence_schema=evidence_schema)
     fallback = {
-        "edge_type": edge.get("edge_type"),
+        "edge_type": edge_type,
         "confidence": edge.get("confidence", 0.0),
-        "bottleneck": (edge.get("evidence") or {}).get("bottleneck") or {},
-        "mechanism": (edge.get("evidence") or {}).get("mechanism") or {},
-        "tradeoff": (edge.get("evidence") or {}).get("tradeoff") or {},
+        "evidence": {
+            slot: (edge.get("evidence") or {}).get(slot) or {}
+            for slot in evidence_slots
+        },
         "rationale": "Deterministic fallback preserving cue-based extraction.",
     }
+    for slot, value in fallback["evidence"].items():
+        fallback[slot] = value
     prompt = (
-        "Audit this evolution edge using the allowed relation schema. Extract bottleneck, mechanism, and tradeoff evidence from the source/target text.\n"
+        "Audit this evolution edge using the allowed relation and evidence schemas.\n"
+        "Return only evidence slots requested below. Do not invent quotes.\n"
         "Every evidence quote must be an exact copied span from the source or target text; leave quote empty if unsupported.\n"
         f"Allowed relation schema:\n{json.dumps(relation_schema or {}, ensure_ascii=False)}\n"
+        f"Evidence schema:\n{json.dumps(evidence_schema or {}, ensure_ascii=False)}\n"
+        f"Required evidence slots for this edge:\n{json.dumps(evidence_slots, ensure_ascii=False)}\n"
         f"Edge JSON:\n{json.dumps(edge, ensure_ascii=False)}\n"
         f"Source text:\n{source_text[:3000]}\n"
         f"Target text:\n{target_text[:3000]}\n"
-        "Return JSON with edge_type, confidence, bottleneck, mechanism, tradeoff, and rationale. "
-        "edge_type must be one of the allowed schema keys. Each bottleneck/mechanism/tradeoff object should include description and quote."
+        "Return JSON with edge_type, confidence, evidence, and rationale. "
+        "edge_type must be one of the allowed schema keys. evidence must be an object keyed by the required evidence slots; "
+        "each slot object must include description and quote."
     )
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
 
@@ -343,7 +354,9 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
     if task == "taxonomy_candidate_judge":
         return "accept" in output and "confidence" in output
     if task == "edge_evidence_judge":
-        return "edge_type" in output and "confidence" in output
+        return "edge_type" in output and "confidence" in output and (
+            "evidence" in output or any(isinstance(output.get(key), dict) for key in ["bottleneck", "mechanism", "tradeoff"])
+        )
     if task == "relation_schema_inference":
         relation_types = output.get("relation_types")
         if not isinstance(relation_types, list):
@@ -363,6 +376,30 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
             return False
         return all(isinstance(row, dict) and row.get("name") and row.get("quote") for row in entities)
     return True
+
+
+def _edge_evidence_slots(
+    *,
+    edge: dict[str, Any],
+    relation_spec: dict[str, Any] | None,
+    evidence_schema: dict[str, Any] | None,
+) -> list[str]:
+    slots = []
+    evidence = edge.get("evidence") if isinstance(edge.get("evidence"), dict) else {}
+    for value in [
+        (relation_spec or {}).get("evidence_slots"),
+        evidence.get("schema_slots"),
+        list((evidence_schema or {}).keys()) if evidence_schema else [],
+    ]:
+        if isinstance(value, list):
+            slots.extend(str(item) for item in value if str(item).strip())
+    if not slots:
+        slots = ["bottleneck", "mechanism", "tradeoff"]
+    deduped: list[str] = []
+    for slot in slots:
+        if slot not in deduped:
+            deduped.append(slot)
+    return deduped
 
 
 def _record_from_row(row: dict[str, Any]) -> LLMRecord:

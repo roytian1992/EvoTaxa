@@ -174,11 +174,13 @@ def _adapt_schema_command(config_path: Path, run_root: Path | None) -> dict[str,
     write_json(schema_root / "relation_schema.final.json", adapted.relation_schema)
     write_json(schema_root / "evidence_schema.final.json", adapted.evidence_schema)
     write_jsonl(schema_root / "schema_reports.jsonl", adapted.reports)
+    write_jsonl(schema_root / "schema_revision_candidates.jsonl", adapted.revision_candidates)
     write_jsonl(schema_root / "relation_schema.revisions.jsonl", [row for row in revisions if row.get("schema_family") == "relation_schema"])
     write_jsonl(schema_root / "entity_schema.revisions.jsonl", [row for row in revisions if row.get("schema_family") == "entity_schema"])
     write_jsonl(schema_root / "evidence_schema.revisions.jsonl", [row for row in revisions if row.get("schema_family") == "evidence_schema"])
     return {
         "schema_root": str(schema_root),
+        "schema_revision_candidates": len(adapted.revision_candidates),
         "schema_revisions": len(revisions),
         "entity_schema_types": len(adapted.entity_schema),
         "relation_schema_types": len(adapted.relation_schema),

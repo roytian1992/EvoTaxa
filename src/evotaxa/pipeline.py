@@ -252,6 +252,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_json(output_root / "schema" / "evidence_schema.inferred.json", schema_bundle.inferred_evidence_schema)
     write_json(output_root / "schema" / "evidence_schema.final.json", schema_bundle.evidence_schema)
     write_jsonl(output_root / "schema" / "schema_reports.jsonl", schema_bundle.reports)
+    write_jsonl(output_root / "schema" / "schema_revision_candidates.jsonl", schema_bundle.revision_candidates)
     write_jsonl(output_root / "schema" / "relation_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "relation_schema"])
     write_jsonl(output_root / "schema" / "entity_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "entity_schema"])
     write_jsonl(output_root / "schema" / "evidence_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "evidence_schema"])
@@ -312,6 +313,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "entity_schema_types": len(schema_bundle.entity_schema),
             "relation_schema_types": len(schema_bundle.relation_schema),
             "evidence_schema_slots": len(schema_bundle.evidence_schema),
+            "schema_revision_candidates": len(schema_bundle.revision_candidates),
             "schema_revisions": len(schema_revisions),
             "entities": len(entities),
             "raw_entities": raw_entity_count,
@@ -348,6 +350,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "relation_schema": "schema/relation_schema.final.json",
             "evidence_schema": "schema/evidence_schema.final.json",
             "schema_reports": "schema/schema_reports.jsonl",
+            "schema_revision_candidates": "schema/schema_revision_candidates.jsonl",
             "schema_revisions": "schema/",
             "method_registry": "graph/method_registry.jsonl",
             "method_aliases": "graph/method_aliases.jsonl",
@@ -435,9 +438,10 @@ def _build_graph_layer(
                 source_text=doc_map.get(edge.source_document).full_text if doc_map.get(edge.source_document) else "",
                 target_text=doc_map.get(edge.target_document).full_text if doc_map.get(edge.target_document) else "",
                 relation_schema=schema_bundle.relation_schema,
+                evidence_schema=schema_bundle.evidence_schema,
             )
             llm_records.append(record)
-            judged_edges.append(_apply_edge_judgement(edge, record.output))
+            judged_edges.append(_apply_edge_judgement(edge, record.output, schema_bundle.evidence_schema))
         judged_ids = {edge.edge_id for edge in judged_edges}
         edges = [*judged_edges, *[edge for edge in edges if edge.edge_id not in judged_ids]]
     trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
@@ -477,20 +481,35 @@ def _downstream_edges(trusted_edges: list[Any], candidate_edges: list[Any], unve
     return unverified_edges
 
 
-def _apply_edge_judgement(edge: Any, judgement: dict[str, Any]) -> Any:
+def _apply_edge_judgement(edge: Any, judgement: dict[str, Any], evidence_schema: dict[str, Any] | None = None) -> Any:
     edge.edge_type = str(judgement.get("edge_type") or edge.edge_type)
     try:
         edge.confidence = round(float(judgement.get("confidence", edge.confidence)), 3)
     except (TypeError, ValueError):
         pass
     evidence = dict(edge.evidence or {})
-    for key in ["bottleneck", "mechanism", "tradeoff"]:
+    judged_evidence = judgement.get("evidence") if isinstance(judgement.get("evidence"), dict) else {}
+    for key, value in judged_evidence.items():
+        if isinstance(value, dict):
+            evidence[str(key)] = value
+    for key in _judgement_evidence_keys(judgement, evidence_schema):
         if isinstance(judgement.get(key), dict):
             evidence[key] = judgement[key]
     if judgement.get("rationale"):
         evidence["judge_rationale"] = str(judgement["rationale"])
     edge.evidence = evidence
     return edge
+
+
+def _judgement_evidence_keys(judgement: dict[str, Any], evidence_schema: dict[str, Any] | None) -> list[str]:
+    keys = ["bottleneck", "mechanism", "tradeoff"]
+    keys.extend(str(key) for key in (evidence_schema or {}).keys())
+    keys.extend(str(key) for key, value in judgement.items() if isinstance(value, dict))
+    deduped: list[str] = []
+    for key in keys:
+        if key not in {"evidence"} and key not in deduped:
+            deduped.append(key)
+    return deduped
 
 
 def _expansion_application_events(report: list[dict[str, Any]]) -> list[dict[str, Any]]:
