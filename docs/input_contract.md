@@ -140,10 +140,10 @@ For development with a local OpenAI-compatible server:
 ```toml
 [llm]
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
 ```
 
 For shared configs, use:
@@ -151,7 +151,7 @@ For shared configs, use:
 ```toml
 [llm]
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = []
@@ -160,4 +160,4 @@ enabled_tasks = []
 `enabled_tasks = []` means the config is LLM-ready but will not call the model by default.
 Use `enabled_tasks = ["*"]` only when every LLM-backed task may call the configured server.
 
-`run-full` writes `audit/llm_cache.jsonl` by default. Repeated prompts reuse this cache, which makes local GLM experiments reproducible and cheaper to resume. LLM outputs are schema-checked before they can modify edge evidence or apply taxonomy expansion candidates.
+`run-full` writes `audit/llm_cache.jsonl` by default. Repeated prompts reuse this cache, which makes local LLM experiments reproducible and cheaper to resume. LLM outputs are schema-checked before they can modify entity mentions, edge evidence, or taxonomy expansion candidates.

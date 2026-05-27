@@ -44,15 +44,15 @@ python -m evotaxa.cli run-full \
   --print-manifest
 ```
 
-Local OpenAI-compatible GLM development:
+Local OpenAI-compatible LLM development:
 
 ```toml
 [llm]
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
 ```
 
 For committed configs, prefer `api_key_env` instead of a literal token.
@@ -83,6 +83,7 @@ Each run writes:
     method_aliases.jsonl
     entity_linking_report.jsonl
     entity_quality_report.jsonl
+    llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
     method_edges.paper_level.jsonl
     method_edges.aggregated.jsonl

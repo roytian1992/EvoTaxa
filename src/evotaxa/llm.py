@@ -239,6 +239,31 @@ def judge_edge_evidence(
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
 
 
+def extract_document_entities(
+    client: LLMClient,
+    *,
+    doc_id: str,
+    title: str,
+    text: str,
+    entity_types: list[str],
+    max_entities: int,
+) -> LLMRecord:
+    fallback: dict[str, Any] = {"entities": []}
+    prompt = (
+        "Extract evolution-relevant entities from this document.\n"
+        "Each entity must be a method, mechanism, intervention, policy instrument, measurement strategy, "
+        "evaluation protocol, public frame, or other configured type.\n"
+        "Every entity must include an exact quote copied from the document text that supports the mention.\n"
+        f"Allowed entity types: {entity_types}\n"
+        f"Maximum entities: {max_entities}\n"
+        f"Document id: {doc_id}\n"
+        f"Title: {title}\n"
+        f"Text:\n{text[:6000]}\n"
+        "Return JSON: {\"entities\": [{\"name\": \"\", \"entity_type\": \"\", \"quote\": \"\", \"confidence\": 0.0, \"rationale\": \"\"}]}."
+    )
+    return client.complete_json(task="entity_extraction", prompt=prompt, fallback=fallback)
+
+
 def _cache_key(provider: str, model: str, task: str, prompt: str) -> str:
     payload = json.dumps(
         {"provider": provider, "model": model, "task": task, "prompt": prompt},
@@ -255,6 +280,11 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
         return "accept" in output and "confidence" in output
     if task == "edge_evidence_judge":
         return "edge_type" in output and "confidence" in output
+    if task == "entity_extraction":
+        entities = output.get("entities")
+        if not isinstance(entities, list):
+            return False
+        return all(isinstance(row, dict) and row.get("name") and row.get("quote") for row in entities)
     return True
 
 

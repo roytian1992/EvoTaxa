@@ -1,7 +1,7 @@
 [project]
-name = "EvoTaxa Local GLM Development"
+name = "EvoTaxa Local LLM Development"
 domain_id = "dev"
-run_id = "local_glm_dev"
+run_id = "local_llm_dev"
 
 [corpus]
 path = "../tests/fixtures/social/corpus.jsonl"
@@ -35,6 +35,7 @@ entity_dimensions = ["mechanisms", "interventions"]
 entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame"]
 method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame", "governance", "audit", "moderation"]
 min_entity_mentions = 1
+llm_entity_extraction_limit = 12
 
 [graph.entity_patterns]
 intervention = ["inoculation intervention", "community moderation", "platform labeling"]
@@ -42,11 +43,11 @@ policy_instrument = ["transparency mandate", "algorithmic audit"]
 
 [llm]
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
 
 [output]
-root = "../examples/local_glm_output"
+root = "../examples/local_llm_output"
 

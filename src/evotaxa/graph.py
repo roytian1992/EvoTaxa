@@ -77,6 +77,64 @@ def extract_entities(
     return entities, mentions
 
 
+def merge_llm_entity_mentions(
+    docs: list[Document],
+    assignments: dict[str, list[str]],
+    entities: list[EvolutionEntity],
+    mentions: list[EntityMention],
+    extraction_records: list[Any],
+    config: GraphConfig,
+) -> tuple[list[EvolutionEntity], list[EntityMention], list[dict[str, Any]]]:
+    doc_map = {doc.doc_id: doc for doc in docs}
+    mention_map: dict[str, list[EntityMention]] = defaultdict(list)
+    for mention in mentions:
+        mention_map[mention.entity_id].append(mention)
+
+    report: list[dict[str, Any]] = []
+    for record in extraction_records:
+        doc_id = _record_doc_id(record)
+        doc = doc_map.get(doc_id)
+        rows = ((record.output or {}).get("entities") or []) if hasattr(record, "output") else []
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            name = normalize_entity_name(str(row.get("name") or ""))
+            entity_type = str(row.get("entity_type") or "").strip() or _default_entity_type(config)
+            quote = normalize_space(row.get("quote") or "")
+            if entity_type not in set(config.entity_types):
+                entity_type = _default_entity_type(config)
+            verified = bool(doc and validate_evidence_quote(quote, doc.full_text))
+            status = "accepted" if name and verified else "rejected"
+            entity_id = f"{slugify(entity_type)}__{slugify(name)}" if name else ""
+            report.append(
+                {
+                    "doc_id": doc_id,
+                    "row_index": index,
+                    "entity_id": entity_id,
+                    "name": name,
+                    "entity_type": entity_type,
+                    "quote": quote,
+                    "confidence": row.get("confidence"),
+                    "status": status,
+                    "reason": "quote_verified" if verified else "quote_not_verified_or_missing_name",
+                }
+            )
+            if status != "accepted":
+                continue
+            mention_map[entity_id].append(
+                EntityMention(
+                    doc_id=doc_id,
+                    entity_id=entity_id,
+                    canonical_name=name,
+                    taxonomy_nodes=assignments.get(doc_id, []),
+                    evidence=quote[:500],
+                )
+            )
+
+    merged_entities = _entities_from_mentions(docs, mention_map, config)
+    return merged_entities, [mention for rows in mention_map.values() for mention in rows], report
+
+
 def build_edges(
     docs: list[Document],
     entities: list[EvolutionEntity],
@@ -344,3 +402,46 @@ def entity_frequency_summary(entities: list[EvolutionEntity]) -> dict[str, Any]:
         ],
     }
 
+
+def _entities_from_mentions(
+    docs: list[Document],
+    mention_map: dict[str, list[EntityMention]],
+    config: GraphConfig,
+) -> list[EvolutionEntity]:
+    doc_map = {doc.doc_id: doc for doc in docs}
+    entities: list[EvolutionEntity] = []
+    for entity_id, rows in sorted(mention_map.items()):
+        if len({row.doc_id for row in rows}) < config.min_entity_mentions:
+            continue
+        entity_type = entity_id.split("__", 1)[0]
+        support_docs = sorted({row.doc_id for row in rows})
+        first_seen = _first_seen_date([doc_map[doc_id] for doc_id in support_docs if doc_id in doc_map])
+        taxonomy_nodes = sorted({node_id for row in rows for node_id in row.taxonomy_nodes})
+        canonical_name = rows[0].canonical_name
+        entities.append(
+            EvolutionEntity(
+                entity_id=entity_id,
+                canonical_name=canonical_name,
+                aliases=[],
+                first_seen_date=first_seen,
+                support_documents=support_docs,
+                taxonomy_nodes=taxonomy_nodes,
+                entity_type=entity_type,
+            )
+        )
+    return entities
+
+
+def _record_doc_id(record: Any) -> str:
+    output = getattr(record, "output", {}) or {}
+    if output.get("doc_id"):
+        return str(output["doc_id"])
+    prompt = getattr(record, "prompt", "") or ""
+    match = re.search(r"Document id:\s*(.+)", prompt)
+    if match:
+        return match.group(1).strip().splitlines()[0]
+    return ""
+
+
+def _default_entity_type(config: GraphConfig) -> str:
+    return config.entity_types[0] if config.entity_types else "entity"

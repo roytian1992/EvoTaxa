@@ -9,7 +9,7 @@ from evotaxa.config import EvoTaxaConfig, load_config
 from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
 from evotaxa.entity_quality import filter_entities_by_quality
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
-from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities
+from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities, merge_llm_entity_mentions
 from evotaxa.hooks import build_forecast_hooks, build_social_analysis_hooks
 from evotaxa.induction import (
     apply_expansion_candidates,
@@ -20,7 +20,7 @@ from evotaxa.induction import (
 )
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
-from evotaxa.llm import build_llm_client, judge_edge_evidence, judge_taxonomy_candidate
+from evotaxa.llm import build_llm_client, extract_document_entities, judge_edge_evidence, judge_taxonomy_candidate
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
 from evotaxa.taxonomy import build_taxonomy_events, enrich_taxonomy_nodes, judge_taxonomy_quality
@@ -67,15 +67,19 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     taxonomy_events = build_taxonomy_events(previous_nodes, nodes)
     node_quality = judge_taxonomy_quality(docs, nodes)
 
-    entities, mentions = extract_entities(docs, assignments, config.graph)
-    entities, mentions, entity_link_rows = canonicalize_entities(entities, mentions, config.graph)
-    raw_entity_count = len(entities)
-    entities, mentions, entity_quality_report = filter_entities_by_quality(entities, mentions, config.graph)
+    llm_client = build_llm_client(config.llm)
+    llm_records: list[Any] = []
+    entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count = _extract_prepare_entities(
+        docs,
+        assignments,
+        config,
+        llm_client,
+        full=full,
+        llm_records=llm_records,
+    )
     expansion_signals = score_expansion_triggers(docs, nodes, assignments, entities) if full or config.taxonomy.expansion_enabled else []
     expansion_candidates = propose_expansion_candidates(docs, nodes, expansion_signals, config.taxonomy) if full or config.taxonomy.expansion_enabled else []
 
-    llm_client = build_llm_client(config.llm)
-    llm_records: list[Any] = []
     taxonomy_judgements: dict[str, dict[str, Any]] = {}
     if full and expansion_candidates:
         doc_map = {doc.doc_id: doc for doc in docs}
@@ -101,10 +105,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             assignments = expanded_assignments
             enriched_nodes = enrich_taxonomy_nodes(docs, nodes)
             node_quality = judge_taxonomy_quality(docs, nodes)
-            entities, mentions = extract_entities(docs, assignments, config.graph)
-            entities, mentions, entity_link_rows = canonicalize_entities(entities, mentions, config.graph)
-            raw_entity_count = len(entities)
-            entities, mentions, entity_quality_report = filter_entities_by_quality(entities, mentions, config.graph)
+            entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count = _extract_prepare_entities(
+                docs,
+                assignments,
+                config,
+                llm_client,
+                full=full,
+                llm_records=llm_records,
+            )
             taxonomy_events = [*taxonomy_events, *_expansion_application_events(expansion_application_report)]
 
     edges = build_edges(docs, entities, mentions, config.graph)
@@ -152,6 +160,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "graph" / "method_aliases.jsonl", entity_link_rows)
     write_jsonl(output_root / "graph" / "entity_linking_report.jsonl", entity_link_rows)
     write_jsonl(output_root / "graph" / "entity_quality_report.jsonl", entity_quality_report)
+    write_jsonl(output_root / "graph" / "llm_entity_mentions.jsonl", llm_entity_report)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
     write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in edges))
     write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", aggregated_edges)
@@ -195,6 +204,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "raw_entities": raw_entity_count,
             "filtered_entities": max(0, raw_entity_count - len(entities)),
             "entity_link_records": len(entity_link_rows),
+            "llm_entity_mentions": sum(1 for row in llm_entity_report if row.get("status") == "accepted"),
             "mentions": len(mentions),
             "paper_level_edges": len(edges),
             "aggregated_edges": len(aggregated_edges),
@@ -217,6 +227,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "method_aliases": "graph/method_aliases.jsonl",
             "entity_linking_report": "graph/entity_linking_report.jsonl",
             "entity_quality_report": "graph/entity_quality_report.jsonl",
+            "llm_entity_mentions": "graph/llm_entity_mentions.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
@@ -227,6 +238,45 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     }
     write_json(output_root / "manifest.json", manifest)
     return manifest
+
+
+def _extract_prepare_entities(
+    docs: list[Any],
+    assignments: dict[str, list[str]],
+    config: EvoTaxaConfig,
+    llm_client: Any,
+    *,
+    full: bool,
+    llm_records: list[Any],
+) -> tuple[list[Any], list[Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
+    entities, mentions = extract_entities(docs, assignments, config.graph)
+    llm_entity_records: list[Any] = []
+    if full:
+        for doc in docs:
+            record = extract_document_entities(
+                llm_client,
+                doc_id=doc.doc_id,
+                title=doc.title,
+                text=doc.text,
+                entity_types=config.graph.entity_types,
+                max_entities=config.graph.llm_entity_extraction_limit,
+            )
+            llm_records.append(record)
+            llm_entity_records.append(record)
+        entities, mentions, llm_entity_report = merge_llm_entity_mentions(
+            docs,
+            assignments,
+            entities,
+            mentions,
+            llm_entity_records,
+            config.graph,
+        )
+    else:
+        llm_entity_report = []
+    entities, mentions, entity_link_rows = canonicalize_entities(entities, mentions, config.graph)
+    raw_entity_count = len(entities)
+    entities, mentions, entity_quality_report = filter_entities_by_quality(entities, mentions, config.graph)
+    return entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count
 
 
 def _merge_assignments(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:

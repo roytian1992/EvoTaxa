@@ -92,6 +92,7 @@ class GraphConfig:
     min_entity_mentions: int = 1
     max_entities_per_document: int = 12
     max_edge_candidates_per_entity: int = 24
+    llm_entity_extraction_limit: int = 12
     alias_similarity_threshold: float = 0.86
     min_entity_quality: float = 0.42
     entity_allowlist: list[str] = field(default_factory=list)
@@ -282,6 +283,7 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         min_entity_mentions=int(graph_raw.get("min_entity_mentions") or 1),
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
+        llm_entity_extraction_limit=int(graph_raw.get("llm_entity_extraction_limit") or 12),
         alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
         min_entity_quality=float(graph_raw.get("min_entity_quality") or 0.42),
         entity_allowlist=_list(graph_raw, "entity_allowlist", []),

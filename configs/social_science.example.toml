@@ -94,7 +94,7 @@ compares = ["compares", "relative to"]
 [llm]
 # You can switch this to api_key = "token-abc123" for local private experiments.
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = []

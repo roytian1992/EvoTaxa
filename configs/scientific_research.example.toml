@@ -63,9 +63,9 @@ adapts = ["adapts", "transfers"]
 replaces = ["replaces", "instead of"]
 
 [llm]
-# Development local model config. Prefer api_key_env for committed configs.
+# Development OpenAI-compatible LLM config. Prefer api_key_env for committed configs.
 provider = "openai_compat"
-model_name = "GLM-4.6-FP8"
+model_name = "your-model-name"
 api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = []

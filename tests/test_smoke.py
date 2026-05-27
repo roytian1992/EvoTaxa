@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from evotaxa.config import load_config
+from evotaxa.graph import extract_entities, merge_llm_entity_mentions
 from evotaxa.llm import build_llm_client
 from evotaxa.pipeline import run_full, run_lite
 
@@ -43,16 +44,18 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "graph" / "method_aliases.jsonl").exists()
     assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()
+    assert (output_root / "graph" / "llm_entity_mentions.jsonl").exists()
     assert (output_root / "feedback" / "taxonomy_graph_feedback.jsonl").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
 
 
-def test_local_glm_config_shape_is_supported() -> None:
-    config = load_config(REPO_ROOT / "configs" / "local_glm.example.toml")
+def test_local_llm_config_shape_is_supported() -> None:
+    config = load_config(REPO_ROOT / "configs" / "local_llm.example.toml")
     assert config.llm.provider == "openai_compat"
-    assert config.llm.model == "GLM-4.6-FP8"
+    assert config.llm.model == "your-model-name"
     assert config.llm.api_key == "token-abc123"
     assert config.llm.base_url == "http://localhost:8001/v1"
+    assert "entity_extraction" in config.llm.enabled_tasks
 
 
 def test_empty_enabled_tasks_does_not_call_llm() -> None:
@@ -70,3 +73,43 @@ def test_full_pipeline_can_induce_taxonomy_without_node_file() -> None:
     assert manifest["counts"]["taxonomy_nodes"] >= 2
     assert manifest["inputs"]["taxonomy"]["induced_from_corpus"] is True
     assert (Path(manifest["output_root"]) / "taxonomy" / "taxonomy_induction_audit.jsonl").exists()
+
+
+def test_quote_grounded_llm_entity_mentions_are_merged() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    docs = [
+        type(
+            "Doc",
+            (),
+            {
+                "doc_id": "D1",
+                "title": "Platform labeling",
+                "text": "Platform labeling is an intervention for misinformation.",
+                "full_text": "Platform labeling\nPlatform labeling is an intervention for misinformation.",
+                "published_at": None,
+            },
+        )()
+    ]
+    assignments = {"D1": ["interventions__labeling"]}
+    entities, mentions = extract_entities(docs, assignments, config.graph)
+    record = type(
+        "Record",
+        (),
+        {
+            "prompt": "Document id: D1\n",
+            "output": {
+                "entities": [
+                    {
+                        "name": "platform labeling",
+                        "entity_type": "intervention",
+                        "quote": "Platform labeling is an intervention for misinformation.",
+                        "confidence": 0.9,
+                    }
+                ]
+            },
+        },
+    )()
+    merged_entities, merged_mentions, report = merge_llm_entity_mentions(docs, assignments, entities, mentions, [record], config.graph)
+    assert any(row["status"] == "accepted" for row in report)
+    assert any(entity.canonical_name == "platform labeling" for entity in merged_entities)
+    assert any(mention.evidence == "Platform labeling is an intervention for misinformation." for mention in merged_mentions)
