@@ -106,6 +106,8 @@ Each run writes:
     hook_score_report.json
   feedback/
     taxonomy_graph_feedback.jsonl
+  evaluation/
+    quality_report.json
   audit/
     llm_judge_records.jsonl
     llm_cache.jsonl
@@ -148,6 +150,10 @@ In `run-full`, graph feedback can now revise the taxonomy and then rerun the gra
 - `state_annotation`: marks nodes as `growing` or `fragmenting` when trusted edges show branching structure.
 
 The loop writes `taxonomy/revision_candidates.jsonl`, `taxonomy/revision_application_report.jsonl`, and `taxonomy/coevolution_iterations.jsonl`.
+
+## Evaluation
+
+Every run writes `evaluation/quality_report.json`, an intrinsic quality report covering taxonomy quality, entity filtering, edge grounding, co-evolution yield, forecast hooks, and LLM reliability. This is not a substitute for a human gold-standard evaluation, but it gives each experiment a consistent health check and ablation target.
 
 ## Current Scope
 

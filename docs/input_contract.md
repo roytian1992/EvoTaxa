@@ -209,3 +209,16 @@ Revision candidates can be:
 - `state_annotation`: mark an existing node as `growing` or `fragmenting`.
 
 The loop writes `taxonomy/revision_candidates.jsonl`, `taxonomy/revision_application_report.jsonl`, and `taxonomy/coevolution_iterations.jsonl`. Applied revisions are also embedded in `taxonomy/taxonomy_nodes.expanded.json` under each node's `raw.graph_revisions`.
+
+## Evaluation Output
+
+Each run writes `evaluation/quality_report.json`. The report aggregates intrinsic checks that do not require a gold label file:
+
+- taxonomy metric means from `node_quality_scores.jsonl`,
+- entity kept/filter rates from `entity_quality_report.jsonl`,
+- edge trust and quote coverage from `edge_evidence_audit.jsonl`,
+- expansion and co-evolution revision yield,
+- forecast hook score summaries,
+- LLM schema/error/cache reliability.
+
+These metrics are intended as experiment hygiene and ablation targets. A publication-grade evaluation should still add human labels for taxonomy node validity, entity mention accuracy, relation precision, and quote grounding.

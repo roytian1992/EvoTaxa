@@ -10,6 +10,7 @@ from evotaxa.config import EvoTaxaConfig, load_config
 from evotaxa.edge_evidence import stratify_edges_by_evidence
 from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
 from evotaxa.entity_quality import filter_entities_by_quality
+from evotaxa.evaluation import build_quality_report
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
 from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities, merge_llm_entity_mentions
 from evotaxa.hooks import build_forecast_hooks, build_social_analysis_hooks
@@ -190,6 +191,17 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     social_hooks = build_social_analysis_hooks(forecast_hooks)
     feedback_events = synthesize_feedback_events(feedback_rows) if full else []
     taxonomy_events = [*taxonomy_events, *feedback_events]
+    hook_score_report = build_hook_score_report(forecast_hooks) if full else {"hook_count": len(forecast_hooks)}
+    quality_report = build_quality_report(
+        node_quality=node_quality,
+        entity_quality_report=entity_quality_report,
+        edge_evidence_audit=graph_layer["edge_evidence_audit"],
+        hook_score_report=hook_score_report,
+        feedback_rows=feedback_rows,
+        expansion_application_report=expansion_application_report,
+        revision_application_report=revision_application_report,
+        llm_records=llm_records,
+    )
 
     write_jsonl(output_root / "corpus" / "documents.normalized.jsonl", (doc.to_record() for doc in docs))
     write_json(output_root / "corpus" / "manifest.json", corpus_manifest)
@@ -228,8 +240,9 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "search" / "branch_points.jsonl", graph_layer["branch_points"])
     write_jsonl(output_root / "hooks" / "forecast_hooks.jsonl", forecast_hooks)
     write_jsonl(output_root / "hooks" / "social_analysis_hooks.jsonl", social_hooks)
-    write_json(output_root / "hooks" / "hook_score_report.json", build_hook_score_report(forecast_hooks) if full else {"hook_count": len(forecast_hooks)})
+    write_json(output_root / "hooks" / "hook_score_report.json", hook_score_report)
     write_jsonl(output_root / "feedback" / "taxonomy_graph_feedback.jsonl", feedback_rows)
+    write_json(output_root / "evaluation" / "quality_report.json", quality_report)
     write_jsonl(output_root / "audit" / "llm_judge_records.jsonl", (record.to_record() for record in llm_records))
     write_jsonl(output_root / "audit" / "unverified_edges.jsonl", (edge.to_record() for edge in graph_layer["unverified_edges"]))
     write_jsonl(output_root / "audit" / "low_confidence_nodes.jsonl", _low_confidence_nodes(node_quality))
@@ -278,6 +291,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "social_analysis_hooks": len(social_hooks),
             "feedback_rows": len(feedback_rows),
             "llm_judge_records": len(llm_records),
+            "quality_score": quality_report["overall_quality_score"],
         },
         "artifact_layout": {
             "taxonomy_nodes": "taxonomy/taxonomy_nodes.enriched.json",
@@ -303,6 +317,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "evolution_chains": "search/evolution_chains.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
             "taxonomy_graph_feedback": "feedback/taxonomy_graph_feedback.jsonl",
+            "quality_report": "evaluation/quality_report.json",
             "llm_judge_records": "audit/llm_judge_records.jsonl",
             "audit": "audit/",
         },
