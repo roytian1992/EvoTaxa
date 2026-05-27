@@ -4,7 +4,7 @@ EvoTaxa is a config-driven framework for taxonomy-guided evolution modeling.
 
 The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, separates trusted/candidate edges, searches local lineage chains, and emits forecast/social-analysis hooks.
 
-`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, quote-grounded edge evidence auditing, taxonomy-graph feedback, and forecast-hook scoring.
+`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, quote-grounded edge evidence auditing, taxonomy-graph co-evolution revisions, and forecast-hook scoring.
 
 ## Why Config-Driven
 
@@ -75,6 +75,9 @@ Each run writes:
     expansion_trigger_scores.jsonl
     expansion_candidates.jsonl
     expansion_application_report.jsonl
+    revision_candidates.jsonl
+    revision_application_report.jsonl
+    coevolution_iterations.jsonl
     node_quality_scores.jsonl
     taxonomy_judge_report.json
     document_assignments.normalized.jsonl
@@ -135,6 +138,16 @@ Every edge is audited after construction. EvoTaxa checks quotes in `bottleneck`,
 - `graph/edge_evidence_audit.jsonl`: field-level quote checks and the reason for each edge status.
 
 Search, hooks, and feedback use trusted edges when available; if a run has no trusted edges, they fall back to candidate edges so small exploratory corpora still produce inspectable outputs.
+
+## Taxonomy-Graph Co-Evolution
+
+In `run-full`, graph feedback can now revise the taxonomy and then rerun the graph layer. Revisions are conservative by default:
+
+- `split_child`: creates a graph-derived child only when the entity type matches the taxonomy dimension and the label is not already present.
+- `cross_link`: annotates a node with cross-dimensional linked entities or nodes.
+- `state_annotation`: marks nodes as `growing` or `fragmenting` when trusted edges show branching structure.
+
+The loop writes `taxonomy/revision_candidates.jsonl`, `taxonomy/revision_application_report.jsonl`, and `taxonomy/coevolution_iterations.jsonl`.
 
 ## Current Scope
 

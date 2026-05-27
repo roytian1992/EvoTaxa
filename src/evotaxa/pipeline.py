@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from evotaxa.coevolution import apply_taxonomy_revisions, propose_taxonomy_revisions
 from evotaxa.config import EvoTaxaConfig, load_config
 from evotaxa.edge_evidence import stratify_edges_by_evidence
 from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
@@ -116,32 +117,77 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             )
             taxonomy_events = [*taxonomy_events, *_expansion_application_events(expansion_application_report)]
 
-    edges = build_edges(docs, entities, mentions, config.graph)
-    edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
-    if full and edges:
-        doc_map = {doc.doc_id: doc for doc in docs}
-        judged_edges = []
-        for edge in edges[: max(0, config.graph.llm_edge_judge_limit)]:
-            record = judge_edge_evidence(
-                llm_client,
-                edge=edge.to_record(),
-                source_text=doc_map.get(edge.source_document).full_text if doc_map.get(edge.source_document) else "",
-                target_text=doc_map.get(edge.target_document).full_text if doc_map.get(edge.target_document) else "",
+    graph_layer = _build_graph_layer(
+        docs,
+        entities,
+        mentions,
+        entity_link_rows,
+        config,
+        llm_client,
+        llm_records,
+        full=full,
+    )
+    feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates) if full else []
+    revision_candidates: list[dict[str, Any]] = []
+    revision_application_report: list[dict[str, Any]] = []
+    coevolution_iteration_reports: list[dict[str, Any]] = []
+    if full and config.taxonomy.coevolution_enabled:
+        for iteration in range(max(0, config.taxonomy.max_coevolution_iterations)):
+            revision_candidates = propose_taxonomy_revisions(
+                nodes,
+                entities,
+                graph_layer["downstream_edges"],
+                feedback_rows,
+                config.taxonomy,
             )
-            llm_records.append(record)
-            judged_edges.append(_apply_edge_judgement(edge, record.output))
-        judged_ids = {edge.edge_id for edge in judged_edges}
-        edges = [*judged_edges, *[edge for edge in edges if edge.edge_id not in judged_ids]]
-    trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
-    downstream_edges = _downstream_edges(trusted_edges, candidate_edges, unverified_edges)
-    aggregated_edges = aggregate_edges(downstream_edges)
-    chains = search_evolution_chains(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
-    branch_points = extract_branch_points(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
-    forecast_hooks = build_forecast_hooks(downstream_edges, chains, branch_points, strong_edge_types=config.graph.strong_edge_types)
-    edge_index = {edge.edge_id: edge.to_record() for edge in downstream_edges}
-    forecast_hooks = score_forecast_hooks(forecast_hooks, edge_index) if full else forecast_hooks
+            if not revision_candidates:
+                coevolution_iteration_reports.append({"iteration": iteration + 1, "status": "no_revision_candidates"})
+                break
+            revised_nodes, revised_assignments, revision_application_report = apply_taxonomy_revisions(
+                nodes,
+                assignments,
+                revision_candidates,
+                config.taxonomy,
+            )
+            applied_revisions = [row for row in revision_application_report if row.get("status") == "applied"]
+            coevolution_iteration_reports.append(
+                {
+                    "iteration": iteration + 1,
+                    "status": "applied" if applied_revisions else "no_applied_revisions",
+                    "revision_candidates": len(revision_candidates),
+                    "applied_revisions": len(applied_revisions),
+                }
+            )
+            if not applied_revisions:
+                break
+            nodes = attach_node_support(docs, revised_nodes, revised_assignments)
+            assignments = revised_assignments
+            enriched_nodes = enrich_taxonomy_nodes(docs, nodes)
+            node_quality = judge_taxonomy_quality(docs, nodes)
+            entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count = _extract_prepare_entities(
+                docs,
+                assignments,
+                config,
+                llm_client,
+                full=full,
+                llm_records=llm_records,
+            )
+            graph_layer = _build_graph_layer(
+                docs,
+                entities,
+                mentions,
+                entity_link_rows,
+                config,
+                llm_client,
+                llm_records,
+                full=full,
+            )
+            feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates)
+            taxonomy_events = [*taxonomy_events, *_revision_application_events(revision_application_report)]
+
+    chains = graph_layer["chains"]
+    forecast_hooks = graph_layer["forecast_hooks"]
     social_hooks = build_social_analysis_hooks(forecast_hooks)
-    feedback_rows = build_taxonomy_graph_feedback(nodes, entities, downstream_edges, expansion_candidates) if full else []
     feedback_events = synthesize_feedback_events(feedback_rows) if full else []
     taxonomy_events = [*taxonomy_events, *feedback_events]
 
@@ -158,6 +204,9 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "taxonomy" / "expansion_trigger_scores.jsonl", (row.to_record() for row in expansion_signals))
     write_jsonl(output_root / "taxonomy" / "expansion_candidates.jsonl", expansion_candidates)
     write_jsonl(output_root / "taxonomy" / "expansion_application_report.jsonl", expansion_application_report)
+    write_jsonl(output_root / "taxonomy" / "revision_candidates.jsonl", revision_candidates)
+    write_jsonl(output_root / "taxonomy" / "revision_application_report.jsonl", revision_application_report)
+    write_jsonl(output_root / "taxonomy" / "coevolution_iterations.jsonl", coevolution_iteration_reports)
 
     write_jsonl(output_root / "graph" / "method_registry.jsonl", (entity.to_record() for entity in entities))
     write_jsonl(output_root / "graph" / "method_aliases.jsonl", entity_link_rows)
@@ -165,24 +214,24 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "graph" / "entity_quality_report.jsonl", entity_quality_report)
     write_jsonl(output_root / "graph" / "llm_entity_mentions.jsonl", llm_entity_report)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
-    write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in edges))
-    write_jsonl(output_root / "graph" / "method_edges.trusted.jsonl", (edge.to_record() for edge in trusted_edges))
-    write_jsonl(output_root / "graph" / "method_edges.candidate.jsonl", (edge.to_record() for edge in candidate_edges))
-    write_jsonl(output_root / "graph" / "method_edges.unverified.jsonl", (edge.to_record() for edge in unverified_edges))
-    write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", aggregated_edges)
-    write_jsonl(output_root / "graph" / "method_edges.all_aggregated.jsonl", aggregate_edges(edges))
-    write_jsonl(output_root / "graph" / "edge_evidence_audit.jsonl", edge_evidence_audit)
-    write_jsonl(output_root / "graph" / "method_evidence_records.jsonl", _evidence_rows(edges))
+    write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in graph_layer["edges"]))
+    write_jsonl(output_root / "graph" / "method_edges.trusted.jsonl", (edge.to_record() for edge in graph_layer["trusted_edges"]))
+    write_jsonl(output_root / "graph" / "method_edges.candidate.jsonl", (edge.to_record() for edge in graph_layer["candidate_edges"]))
+    write_jsonl(output_root / "graph" / "method_edges.unverified.jsonl", (edge.to_record() for edge in graph_layer["unverified_edges"]))
+    write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", graph_layer["aggregated_edges"])
+    write_jsonl(output_root / "graph" / "method_edges.all_aggregated.jsonl", aggregate_edges(graph_layer["edges"]))
+    write_jsonl(output_root / "graph" / "edge_evidence_audit.jsonl", graph_layer["edge_evidence_audit"])
+    write_jsonl(output_root / "graph" / "method_evidence_records.jsonl", _evidence_rows(graph_layer["edges"]))
     write_json(output_root / "graph" / "entity_summary.json", entity_frequency_summary(entities))
 
-    write_jsonl(output_root / "search" / "evolution_chains.jsonl", (chain.to_record() for chain in chains))
-    write_jsonl(output_root / "search" / "branch_points.jsonl", branch_points)
+    write_jsonl(output_root / "search" / "evolution_chains.jsonl", (chain.to_record() for chain in graph_layer["chains"]))
+    write_jsonl(output_root / "search" / "branch_points.jsonl", graph_layer["branch_points"])
     write_jsonl(output_root / "hooks" / "forecast_hooks.jsonl", forecast_hooks)
     write_jsonl(output_root / "hooks" / "social_analysis_hooks.jsonl", social_hooks)
     write_json(output_root / "hooks" / "hook_score_report.json", build_hook_score_report(forecast_hooks) if full else {"hook_count": len(forecast_hooks)})
     write_jsonl(output_root / "feedback" / "taxonomy_graph_feedback.jsonl", feedback_rows)
     write_jsonl(output_root / "audit" / "llm_judge_records.jsonl", (record.to_record() for record in llm_records))
-    write_jsonl(output_root / "audit" / "unverified_edges.jsonl", (edge.to_record() for edge in unverified_edges))
+    write_jsonl(output_root / "audit" / "unverified_edges.jsonl", (edge.to_record() for edge in graph_layer["unverified_edges"]))
     write_jsonl(output_root / "audit" / "low_confidence_nodes.jsonl", _low_confidence_nodes(node_quality))
 
     manifest = {
@@ -208,20 +257,23 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "expansion_signals": len(expansion_signals),
             "expansion_candidates": len(expansion_candidates),
             "applied_expansions": sum(1 for row in expansion_application_report if row.get("status") == "applied"),
+            "revision_candidates": len(revision_candidates),
+            "applied_revisions": sum(1 for row in revision_application_report if row.get("status") == "applied"),
+            "coevolution_iterations": len(coevolution_iteration_reports),
             "entities": len(entities),
             "raw_entities": raw_entity_count,
             "filtered_entities": max(0, raw_entity_count - len(entities)),
             "entity_link_records": len(entity_link_rows),
             "llm_entity_mentions": sum(1 for row in llm_entity_report if row.get("status") == "accepted"),
             "mentions": len(mentions),
-            "paper_level_edges": len(edges),
-            "trusted_edges": len(trusted_edges),
-            "candidate_edges": len(candidate_edges),
-            "unverified_edges": len(unverified_edges),
-            "downstream_edges": len(downstream_edges),
-            "aggregated_edges": len(aggregated_edges),
-            "evolution_chains": len(chains),
-            "branch_points": len(branch_points),
+            "paper_level_edges": len(graph_layer["edges"]),
+            "trusted_edges": len(graph_layer["trusted_edges"]),
+            "candidate_edges": len(graph_layer["candidate_edges"]),
+            "unverified_edges": len(graph_layer["unverified_edges"]),
+            "downstream_edges": len(graph_layer["downstream_edges"]),
+            "aggregated_edges": len(graph_layer["aggregated_edges"]),
+            "evolution_chains": len(graph_layer["chains"]),
+            "branch_points": len(graph_layer["branch_points"]),
             "forecast_hooks": len(forecast_hooks),
             "social_analysis_hooks": len(social_hooks),
             "feedback_rows": len(feedback_rows),
@@ -234,6 +286,9 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "expansion_trigger_scores": "taxonomy/expansion_trigger_scores.jsonl",
             "expansion_candidates": "taxonomy/expansion_candidates.jsonl",
             "expansion_application_report": "taxonomy/expansion_application_report.jsonl",
+            "revision_candidates": "taxonomy/revision_candidates.jsonl",
+            "revision_application_report": "taxonomy/revision_application_report.jsonl",
+            "coevolution_iterations": "taxonomy/coevolution_iterations.jsonl",
             "expanded_taxonomy_nodes": "taxonomy/taxonomy_nodes.expanded.json",
             "method_registry": "graph/method_registry.jsonl",
             "method_aliases": "graph/method_aliases.jsonl",
@@ -295,6 +350,55 @@ def _extract_prepare_entities(
     return entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count
 
 
+def _build_graph_layer(
+    docs: list[Any],
+    entities: list[Any],
+    mentions: list[Any],
+    entity_link_rows: list[dict[str, Any]],
+    config: EvoTaxaConfig,
+    llm_client: Any,
+    llm_records: list[Any],
+    *,
+    full: bool,
+) -> dict[str, Any]:
+    edges = build_edges(docs, entities, mentions, config.graph)
+    edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
+    if full and edges:
+        doc_map = {doc.doc_id: doc for doc in docs}
+        judged_edges = []
+        for edge in edges[: max(0, config.graph.llm_edge_judge_limit)]:
+            record = judge_edge_evidence(
+                llm_client,
+                edge=edge.to_record(),
+                source_text=doc_map.get(edge.source_document).full_text if doc_map.get(edge.source_document) else "",
+                target_text=doc_map.get(edge.target_document).full_text if doc_map.get(edge.target_document) else "",
+            )
+            llm_records.append(record)
+            judged_edges.append(_apply_edge_judgement(edge, record.output))
+        judged_ids = {edge.edge_id for edge in judged_edges}
+        edges = [*judged_edges, *[edge for edge in edges if edge.edge_id not in judged_ids]]
+    trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
+    downstream_edges = _downstream_edges(trusted_edges, candidate_edges, unverified_edges)
+    aggregated_edges = aggregate_edges(downstream_edges)
+    chains = search_evolution_chains(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    branch_points = extract_branch_points(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    forecast_hooks = build_forecast_hooks(downstream_edges, chains, branch_points, strong_edge_types=config.graph.strong_edge_types)
+    edge_index = {edge.edge_id: edge.to_record() for edge in downstream_edges}
+    forecast_hooks = score_forecast_hooks(forecast_hooks, edge_index) if full else forecast_hooks
+    return {
+        "edges": edges,
+        "trusted_edges": trusted_edges,
+        "candidate_edges": candidate_edges,
+        "unverified_edges": unverified_edges,
+        "edge_evidence_audit": edge_evidence_audit,
+        "downstream_edges": downstream_edges,
+        "aggregated_edges": aggregated_edges,
+        "chains": chains,
+        "branch_points": branch_points,
+        "forecast_hooks": forecast_hooks,
+    }
+
+
 def _merge_assignments(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:
     merged: dict[str, set[str]] = {doc_id: set(node_ids) for doc_id, node_ids in left.items()}
     for doc_id, node_ids in right.items():
@@ -340,6 +444,38 @@ def _expansion_application_events(report: list[dict[str, Any]]) -> list[dict[str
                 "target_node_ids": [row["new_node_id"]],
                 "support_documents": row.get("support_documents") or [],
                 "reason": "Expansion candidate accepted by judge and applied to taxonomy snapshot.",
+                "confidence": row.get("confidence", 0.0),
+                "source_candidate_id": row.get("candidate_id"),
+            }
+        )
+    return events
+
+
+def _revision_application_events(report: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for row in report:
+        if row.get("status") != "applied":
+            continue
+        revision_type = str(row.get("revision_type") or "")
+        event_type = "revision"
+        target_node_ids: list[str] = []
+        if revision_type == "split_child":
+            event_type = "split"
+            target_node_ids = [str(row.get("new_node_id") or "")]
+        elif revision_type == "cross_link":
+            event_type = "cross_link"
+        elif revision_type == "state_annotation":
+            event_type = "state_update"
+        events.append(
+            {
+                "event_id": f"revision__{event_type}__{row.get('candidate_id')}",
+                "event_type": event_type,
+                "time_slice": "",
+                "source_node_ids": [str(row.get("source_node_id") or "")],
+                "target_node_ids": [node_id for node_id in target_node_ids if node_id],
+                "support_documents": row.get("support_documents") or [],
+                "support_edges": row.get("support_edges") or [],
+                "reason": row.get("reason") or "Applied taxonomy-graph coevolution revision.",
                 "confidence": row.get("confidence", 0.0),
                 "source_candidate_id": row.get("candidate_id"),
             }

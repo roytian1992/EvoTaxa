@@ -62,6 +62,11 @@ class TaxonomyConfig:
     depth_threshold: float = 0.65
     max_expansion_candidates: int = 50
     max_applied_expansions: int = 20
+    coevolution_enabled: bool = True
+    max_coevolution_iterations: int = 1
+    max_revision_candidates: int = 30
+    max_applied_revisions: int = 10
+    revision_acceptance_threshold: float = 0.58
 
 
 @dataclass
@@ -268,6 +273,11 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         depth_threshold=float(taxonomy_raw.get("depth_threshold") or 0.65),
         max_expansion_candidates=int(taxonomy_raw.get("max_expansion_candidates") or 50),
         max_applied_expansions=int(taxonomy_raw.get("max_applied_expansions") or 20),
+        coevolution_enabled=bool(taxonomy_raw.get("coevolution_enabled", True)),
+        max_coevolution_iterations=int(taxonomy_raw.get("max_coevolution_iterations", 1)),
+        max_revision_candidates=int(taxonomy_raw.get("max_revision_candidates", 30)),
+        max_applied_revisions=int(taxonomy_raw.get("max_applied_revisions", 10)),
+        revision_acceptance_threshold=float(taxonomy_raw.get("revision_acceptance_threshold", 0.58)),
     )
 
     graph = GraphConfig(

@@ -21,6 +21,11 @@ assignments_path = "../tests/fixtures/social/assignments.jsonl"
 expansion_enabled = true
 expansion_threshold = 0.35
 min_cluster_documents = 1
+coevolution_enabled = true
+max_coevolution_iterations = 1
+max_revision_candidates = 30
+max_applied_revisions = 10
+revision_acceptance_threshold = 0.58
 
 [taxonomy.dimensions.mechanisms]
 display_name = "Mechanisms"

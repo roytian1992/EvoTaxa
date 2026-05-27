@@ -42,9 +42,15 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert manifest["mode"] == "full"
     assert manifest["counts"]["expansion_signals"] >= 1
     assert manifest["counts"]["applied_expansions"] >= 1
+    assert manifest["counts"]["coevolution_iterations"] >= 1
+    assert manifest["counts"]["revision_candidates"] >= 1
+    assert manifest["counts"]["applied_revisions"] >= 1
     assert (output_root / "taxonomy" / "expansion_trigger_scores.jsonl").exists()
     assert (output_root / "taxonomy" / "taxonomy_nodes.expanded.json").exists()
     assert (output_root / "taxonomy" / "expansion_application_report.jsonl").exists()
+    assert (output_root / "taxonomy" / "revision_candidates.jsonl").exists()
+    assert (output_root / "taxonomy" / "revision_application_report.jsonl").exists()
+    assert (output_root / "taxonomy" / "coevolution_iterations.jsonl").exists()
     assert (output_root / "graph" / "method_aliases.jsonl").exists()
     assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()

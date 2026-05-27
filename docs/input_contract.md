@@ -97,6 +97,7 @@ The config controls:
 - cutoff policy,
 - accepted roles,
 - taxonomy dimensions,
+- taxonomy co-evolution revision limits,
 - entity types,
 - entity seed patterns,
 - entity alias maps,
@@ -185,3 +186,26 @@ require_verified_evidence_for_trusted = true
 ```
 
 `graph/method_edges.paper_level.jsonl` keeps all edges. `graph/method_edges.trusted.jsonl`, `graph/method_edges.candidate.jsonl`, and `graph/method_edges.unverified.jsonl` provide the auditable split. `graph/edge_evidence_audit.jsonl` records quote-level verification results and status reasons.
+
+## Taxonomy-Graph Co-Evolution
+
+`run-full` can use trusted graph feedback to revise the taxonomy, then rerun entity extraction, edge construction, evidence audit, hooks, and feedback on the revised taxonomy.
+
+Useful config keys:
+
+```toml
+[taxonomy]
+coevolution_enabled = true
+max_coevolution_iterations = 1
+max_revision_candidates = 30
+max_applied_revisions = 10
+revision_acceptance_threshold = 0.58
+```
+
+Revision candidates can be:
+
+- `split_child`: create a graph-derived child when the candidate label is clean, non-duplicate, and compatible with the taxonomy dimension.
+- `cross_link`: annotate an existing node with cross-dimensional linked entities or related taxonomy nodes.
+- `state_annotation`: mark an existing node as `growing` or `fragmenting`.
+
+The loop writes `taxonomy/revision_candidates.jsonl`, `taxonomy/revision_application_report.jsonl`, and `taxonomy/coevolution_iterations.jsonl`. Applied revisions are also embedded in `taxonomy/taxonomy_nodes.expanded.json` under each node's `raw.graph_revisions`.
