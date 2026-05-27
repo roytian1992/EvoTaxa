@@ -140,6 +140,8 @@ def build_edges(
     entities: list[EvolutionEntity],
     mentions: list[EntityMention],
     config: GraphConfig,
+    relation_schema: dict[str, dict[str, Any]] | None = None,
+    evidence_schema: dict[str, dict[str, Any]] | None = None,
 ) -> list[EvolutionEdge]:
     doc_map = {doc.doc_id: doc for doc in docs}
     mention_by_entity: dict[str, list[EntityMention]] = defaultdict(list)
@@ -160,27 +162,20 @@ def build_edges(
                 continue
             pair_docs = _candidate_document_pairs(source, target, doc_map)
             for source_doc, target_doc in pair_docs[: config.max_edge_candidates_per_entity]:
-                edge_type, cue, evidence_sentence = _infer_edge_type(source, target, source_doc, target_doc, config)
+                edge_type, cue, evidence_sentence = _infer_edge_type(source, target, source_doc, target_doc, config, relation_schema)
                 if edge_type == "background":
                     confidence = 0.35
                 else:
                     confidence = _edge_confidence(source, target, source_doc, target_doc, edge_type, cue)
-                evidence = {
-                    "cue": cue,
-                    "bottleneck": {
-                        "description": _infer_bottleneck(evidence_sentence),
-                        "quote": evidence_sentence,
-                        "dimension": "",
-                    },
-                    "mechanism": {
-                        "description": f"{target.canonical_name} is connected to {source.canonical_name}.",
-                        "quote": evidence_sentence,
-                    },
-                    "tradeoff": {
-                        "description": "",
-                        "quote": "",
-                    },
-                }
+                evidence = _initial_edge_evidence(
+                    source=source,
+                    target=target,
+                    evidence_sentence=evidence_sentence,
+                    relation_schema=relation_schema,
+                    evidence_schema=evidence_schema,
+                    edge_type=edge_type,
+                    cue=cue,
+                )
                 substring_verified = validate_evidence_quote(evidence_sentence, target_doc.full_text) or validate_evidence_quote(
                     evidence_sentence, source_doc.full_text
                 )
@@ -202,6 +197,59 @@ def build_edges(
                 if existing is None or new_edge.confidence > existing.confidence:
                     edges[edge_id] = new_edge
     return sorted(edges.values(), key=lambda edge: (-edge.confidence, edge.edge_id))
+
+
+def _initial_edge_evidence(
+    *,
+    source: EvolutionEntity,
+    target: EvolutionEntity,
+    evidence_sentence: str,
+    relation_schema: dict[str, dict[str, Any]] | None,
+    evidence_schema: dict[str, dict[str, Any]] | None,
+    edge_type: str,
+    cue: str,
+) -> dict[str, Any]:
+    slots = list(((relation_schema or {}).get(edge_type) or {}).get("evidence_slots") or [])
+    if not slots:
+        slots = list((evidence_schema or {}).keys()) or ["bottleneck", "mechanism", "tradeoff"]
+    evidence: dict[str, Any] = {
+        "cue": cue,
+        "schema_slots": slots,
+    }
+    for slot in slots:
+        if slot == "bottleneck":
+            evidence[slot] = {
+                "description": _infer_bottleneck(evidence_sentence),
+                "quote": evidence_sentence if _infer_bottleneck(evidence_sentence) else "",
+                "dimension": "",
+            }
+        elif slot == "mechanism":
+            evidence[slot] = {
+                "description": f"{target.canonical_name} is connected to {source.canonical_name}.",
+                "quote": evidence_sentence,
+            }
+        elif slot == "tradeoff":
+            evidence[slot] = {
+                "description": "",
+                "quote": "",
+            }
+        else:
+            spec = (evidence_schema or {}).get(slot) or {}
+            evidence[slot] = {
+                "description": spec.get("definition", ""),
+                "quote": evidence_sentence if bool(spec.get("required", False)) else "",
+            }
+    for required in ["bottleneck", "mechanism", "tradeoff"]:
+        evidence.setdefault(
+            required,
+            {
+                "description": f"{target.canonical_name} is connected to {source.canonical_name}."
+                if required == "mechanism"
+                else "",
+                "quote": evidence_sentence if required == "mechanism" else "",
+            },
+        )
+    return evidence
 
 
 def validate_evidence_quote(quote: str, text: str) -> bool:
@@ -330,6 +378,7 @@ def _infer_edge_type(
     source_doc: Document,
     target_doc: Document,
     config: GraphConfig,
+    relation_schema: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[str, str, str]:
     text = target_doc.full_text
     source_name = source.canonical_name
@@ -344,13 +393,23 @@ def _infer_edge_type(
     best = ("background", "", candidate_sentences[0][:500])
     for sentence in candidate_sentences:
         low = sentence.lower()
-        for edge_type, cues in config.edge_cues.items():
+        for edge_type, cues in _relation_cues(config, relation_schema).items():
             for cue in cues:
                 if cue.lower() in low:
                     return edge_type, cue, sentence[:500]
         if source_name.lower() in low and target_name.lower() in low:
             best = ("uses_component", "co-mention", sentence[:500])
     return best
+
+
+def _relation_cues(config: GraphConfig, relation_schema: dict[str, dict[str, Any]] | None) -> dict[str, list[str]]:
+    cues = {edge_type: list(values) for edge_type, values in config.edge_cues.items()}
+    for edge_type, spec in (relation_schema or {}).items():
+        merged = set(cues.get(edge_type, []))
+        merged.update(str(item) for item in spec.get("cues") or [] if str(item).strip())
+        merged.update(str(item) for item in spec.get("positive_cues") or [] if str(item).strip())
+        cues[edge_type] = sorted(merged)
+    return cues
 
 
 def _edge_confidence(

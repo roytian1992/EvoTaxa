@@ -35,6 +35,14 @@ definition = "Explanatory social, behavioral, institutional, or communication me
 display_name = "Interventions"
 definition = "Policy instruments, platform interventions, and program designs."
 
+[schema]
+entity_schema_mode = "adaptive"
+relation_schema_mode = "adaptive"
+evidence_schema_mode = "adaptive"
+schema_inference_sample_size = 30
+schema_revision_min_support = 2
+max_schema_revisions = 3
+
 [graph]
 entity_dimensions = ["mechanisms", "interventions"]
 entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame"]
@@ -55,7 +63,7 @@ provider = "openai_compat"
 model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge", "relation_schema_inference", "entity_evidence_schema_inference"]
 
 [output]
 root = "../examples/local_llm_output"

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from evotaxa.io import as_str_list, parse_date
 from evotaxa.models import DimensionSpec
+from evotaxa import toml_compat
 
 
 DEFAULT_EDGE_CUES: dict[str, list[str]] = {
@@ -70,6 +70,20 @@ class TaxonomyConfig:
 
 
 @dataclass
+class SchemaConfig:
+    entity_schema_mode: str = "fixed"
+    relation_schema_mode: str = "fixed"
+    evidence_schema_mode: str = "fixed"
+    schema_seed_path: Path | None = None
+    schema_inference_sample_size: int = 30
+    schema_revision_min_support: int = 3
+    max_schema_revisions: int = 3
+    entity_schema: dict[str, dict[str, Any]] = field(default_factory=dict)
+    relation_schema: dict[str, dict[str, Any]] = field(default_factory=dict)
+    evidence_schema: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
 class GraphConfig:
     entity_dimensions: list[str] = field(default_factory=list)
     entity_types: list[str] = field(default_factory=lambda: ["method", "mechanism", "intervention", "evaluation_protocol"])
@@ -77,6 +91,11 @@ class GraphConfig:
     entity_patterns: dict[str, list[str]] = field(default_factory=dict)
     entity_aliases: dict[str, list[str]] = field(default_factory=dict)
     edge_cues: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_EDGE_CUES))
+    relation_schema_mode: str = "fixed"
+    relation_schema: dict[str, dict[str, Any]] = field(default_factory=dict)
+    relation_schema_inference_limit: int = 12
+    relation_schema_adaptation_min_support: int = 2
+    max_relation_types: int = 12
     method_cue_terms: list[str] = field(default_factory=lambda: [
         "agent",
         "architecture",
@@ -160,6 +179,7 @@ class EvoTaxaConfig:
     project: ProjectConfig
     corpus: CorpusConfig
     taxonomy: TaxonomyConfig
+    schema: SchemaConfig
     graph: GraphConfig
     llm: LLMConfig
     output: OutputConfig
@@ -216,18 +236,32 @@ def _merge_edge_cues(raw: dict[str, Any]) -> dict[str, list[str]]:
     return cues
 
 
+def _dict_of_dicts(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): dict(item) for key, item in value.items() if isinstance(item, dict)}
+
+
+def _schema_mode(raw: Any) -> str:
+    mode = str(raw or "fixed").strip().lower()
+    if mode not in {"fixed", "inferred", "adaptive"}:
+        raise ValueError(f"Invalid schema mode: {mode}")
+    return mode
+
+
 def load_config(path: str | Path) -> EvoTaxaConfig:
     config_path = Path(path).expanduser().resolve()
     with config_path.open("rb") as handle:
         if config_path.suffix.lower() == ".json":
             raw = json.loads(handle.read().decode("utf-8"))
         else:
-            raw = tomllib.load(handle)
+            raw = toml_compat.load(handle)
     base = config_path.parent
 
     project_raw = raw.get("project") or {}
     corpus_raw = raw.get("corpus") or {}
     taxonomy_raw = raw.get("taxonomy") or {}
+    schema_raw = raw.get("schema") or {}
     graph_raw = raw.get("graph") or {}
     llm_raw = raw.get("llm") or {}
     output_raw = raw.get("output") or {}
@@ -280,6 +314,27 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         revision_acceptance_threshold=float(taxonomy_raw.get("revision_acceptance_threshold", 0.58)),
     )
 
+    schema = SchemaConfig(
+        entity_schema_mode=_schema_mode(schema_raw.get("entity_schema_mode") or graph_raw.get("entity_schema_mode") or "fixed"),
+        relation_schema_mode=_schema_mode(schema_raw.get("relation_schema_mode") or graph_raw.get("relation_schema_mode") or "fixed"),
+        evidence_schema_mode=_schema_mode(schema_raw.get("evidence_schema_mode") or graph_raw.get("evidence_schema_mode") or "fixed"),
+        schema_seed_path=_resolve_path(base, schema_raw.get("schema_seed_path") or graph_raw.get("schema_seed_path")),
+        schema_inference_sample_size=int(
+            schema_raw.get("schema_inference_sample_size")
+            or graph_raw.get("relation_schema_inference_limit")
+            or 30
+        ),
+        schema_revision_min_support=int(
+            schema_raw.get("schema_revision_min_support")
+            or graph_raw.get("relation_schema_adaptation_min_support")
+            or 3
+        ),
+        max_schema_revisions=int(schema_raw.get("max_schema_revisions") or 3),
+        entity_schema=_dict_of_dicts(schema_raw.get("entity_schema") or graph_raw.get("entity_schema")),
+        relation_schema=_dict_of_dicts(schema_raw.get("relation_schema") or graph_raw.get("relation_schema")),
+        evidence_schema=_dict_of_dicts(schema_raw.get("evidence_schema") or graph_raw.get("evidence_schema")),
+    )
+
     graph = GraphConfig(
         entity_dimensions=_list(graph_raw, "entity_dimensions", []),
         entity_types=_list(graph_raw, "entity_types", GraphConfig().entity_types),
@@ -293,6 +348,11 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
             for key, value in (graph_raw.get("entity_aliases") or {}).items()
         },
         edge_cues=_merge_edge_cues(graph_raw),
+        relation_schema_mode=schema.relation_schema_mode,
+        relation_schema=schema.relation_schema,
+        relation_schema_inference_limit=schema.schema_inference_sample_size,
+        relation_schema_adaptation_min_support=schema.schema_revision_min_support,
+        max_relation_types=int(graph_raw.get("max_relation_types", 12)),
         method_cue_terms=_list(graph_raw, "method_cue_terms", GraphConfig().method_cue_terms),
         min_entity_mentions=int(graph_raw.get("min_entity_mentions") or 1),
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
@@ -318,6 +378,7 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         ),
         corpus=corpus,
         taxonomy=taxonomy,
+        schema=schema,
         graph=graph,
         llm=LLMConfig(
             provider=str(llm_raw.get("provider") or ("openai_compat" if llm_raw.get("base_url") else "deterministic")),

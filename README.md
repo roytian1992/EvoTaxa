@@ -44,6 +44,18 @@ python -m evotaxa.cli run-full \
   --print-manifest
 ```
 
+Schema-only commands:
+
+```bash
+python -m evotaxa.cli infer-schema \
+  --config configs/social_science.example.toml \
+  --print-summary
+
+python -m evotaxa.cli adapt-schema \
+  --config configs/social_science.example.toml \
+  --print-summary
+```
+
 Ablation suite:
 
 ```bash
@@ -66,6 +78,8 @@ enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence
 
 For committed configs, prefer `api_key_env` instead of a literal token.
 Set `enabled_tasks = []` to disable model calls by default, or `enabled_tasks = ["*"]` to allow every LLM-backed task.
+
+For adaptive schema work, also enable `relation_schema_inference` and `entity_evidence_schema_inference`.
 
 ## Output Layout
 
@@ -90,6 +104,20 @@ Each run writes:
     node_quality_scores.jsonl
     taxonomy_judge_report.json
     document_assignments.normalized.jsonl
+  schema/
+    entity_schema.fixed.json
+    entity_schema.inferred.json
+    entity_schema.final.json
+    entity_schema.revisions.jsonl
+    relation_schema.fixed.json
+    relation_schema.inferred.json
+    relation_schema.final.json
+    relation_schema.revisions.jsonl
+    evidence_schema.fixed.json
+    evidence_schema.inferred.json
+    evidence_schema.final.json
+    evidence_schema.revisions.jsonl
+    schema_reports.jsonl
   graph/
     method_registry.jsonl
     method_aliases.jsonl
@@ -131,6 +159,7 @@ Each run writes:
 - `[corpus]`: field mappings, accepted roles, cutoff policy, and source type.
 - `[taxonomy]`: taxonomy node/assignment paths and field mappings.
 - `[taxonomy.dimensions.*]`: domain-specific taxonomy dimensions.
+- `[schema]`: fixed, inferred, or adaptive schema modes for entity, relation, and evidence schemas.
 - `[graph]`: entity types, strong edge types, cue terms, and extraction limits.
 - `[graph.entity_patterns]`: optional seed entities by entity type.
 - `[graph.entity_aliases]`: canonical entity names mapped to aliases for entity linking.
@@ -138,6 +167,16 @@ Each run writes:
 - `[graph.edge_cues]`: phrase cues for typed evolution edges.
 - `[llm]`: optional OpenAI-compatible model configuration for candidate and edge judging.
 - `[output]`: output root.
+
+## Adaptive Schema Evolution
+
+EvoTaxa treats schema as a versioned artifact. `[schema]` supports:
+
+- `fixed`: use configured entity/relation/evidence contracts.
+- `inferred`: infer a domain schema from corpus samples before extraction.
+- `adaptive`: infer or load a schema, then revise it from entity filtering and edge evidence audit signals.
+
+The relation schema is injected into edge construction and LLM edge judging. The entity schema constrains quote-grounded entity extraction. The evidence schema defines which quote-backed slots are audited. Each run writes fixed, inferred, final, and revision artifacts under `schema/`.
 
 ## Edge Evidence
 

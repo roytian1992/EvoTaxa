@@ -44,6 +44,14 @@ definition = "Algorithms, architectures, training recipes, agent loops, and retr
 display_name = "Evaluation Methods"
 definition = "Evaluation protocols, benchmark methods, metrics, and stress tests."
 
+[schema]
+entity_schema_mode = "fixed"
+relation_schema_mode = "fixed"
+evidence_schema_mode = "fixed"
+schema_inference_sample_size = 30
+schema_revision_min_support = 3
+max_schema_revisions = 3
+
 [graph]
 entity_dimensions = ["methodologies", "evaluation_methods"]
 entity_types = ["method", "evaluation_protocol", "mechanism"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from evotaxa.ablation import run_ablation_suite
+from evotaxa.cli import main
 from evotaxa.config import load_config
 from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
@@ -17,23 +18,31 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def test_scientific_config_runs() -> None:
     config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
     manifest = run_lite(config)
+    output_root = Path(manifest["output_root"])
     assert manifest["counts"]["documents"] == 3
     assert manifest["counts"]["taxonomy_nodes"] == 3
     assert manifest["counts"]["entities"] >= 2
-    assert (Path(manifest["output_root"]) / "hooks" / "forecast_hooks.jsonl").exists()
+    assert manifest["counts"]["relation_schema_types"] >= 7
+    assert (output_root / "hooks" / "forecast_hooks.jsonl").exists()
+    assert (output_root / "schema" / "relation_schema.final.json").exists()
+    assert (output_root / "schema" / "entity_schema.final.json").exists()
+    assert (output_root / "schema" / "evidence_schema.final.json").exists()
 
 
 def test_social_config_runs() -> None:
     config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
     manifest = run_lite(config)
+    output_root = Path(manifest["output_root"])
     assert manifest["counts"]["documents"] == 4
     assert manifest["counts"]["taxonomy_nodes"] == 4
     assert manifest["counts"]["entities"] >= 3
+    assert manifest["counts"]["evidence_schema_slots"] >= 3
     assert manifest["counts"]["filtered_entities"] >= 1
     assert manifest["counts"]["entity_link_records"] >= manifest["counts"]["entities"]
     assert manifest["counts"]["trusted_edges"] >= 1
     assert manifest["counts"]["downstream_edges"] == manifest["counts"]["trusted_edges"]
-    assert (Path(manifest["output_root"]) / "hooks" / "social_analysis_hooks.jsonl").exists()
+    assert (output_root / "hooks" / "social_analysis_hooks.jsonl").exists()
+    assert (output_root / "schema" / "schema_reports.jsonl").exists()
 
 
 def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
@@ -53,6 +62,15 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "taxonomy" / "revision_candidates.jsonl").exists()
     assert (output_root / "taxonomy" / "revision_application_report.jsonl").exists()
     assert (output_root / "taxonomy" / "coevolution_iterations.jsonl").exists()
+    assert (output_root / "schema" / "relation_schema.fixed.json").exists()
+    assert (output_root / "schema" / "relation_schema.inferred.json").exists()
+    assert (output_root / "schema" / "relation_schema.revisions.jsonl").exists()
+    assert (output_root / "schema" / "entity_schema.fixed.json").exists()
+    assert (output_root / "schema" / "entity_schema.inferred.json").exists()
+    assert (output_root / "schema" / "entity_schema.revisions.jsonl").exists()
+    assert (output_root / "schema" / "evidence_schema.fixed.json").exists()
+    assert (output_root / "schema" / "evidence_schema.inferred.json").exists()
+    assert (output_root / "schema" / "evidence_schema.revisions.jsonl").exists()
     assert (output_root / "graph" / "method_aliases.jsonl").exists()
     assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()
@@ -73,6 +91,22 @@ def test_local_llm_config_shape_is_supported() -> None:
     assert config.llm.api_key == "token-abc123"
     assert config.llm.base_url == "http://localhost:8001/v1"
     assert "entity_extraction" in config.llm.enabled_tasks
+
+
+def test_schema_modes_are_configurable() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    assert config.schema.entity_schema_mode == "fixed"
+    assert config.schema.relation_schema_mode == "fixed"
+    assert config.schema.evidence_schema_mode == "fixed"
+
+
+def test_schema_cli_commands_write_artifacts() -> None:
+    config_path = REPO_ROOT / "configs" / "social_science.example.toml"
+    assert main(["infer-schema", "--config", str(config_path), "--print-summary"]) == 0
+    assert main(["adapt-schema", "--config", str(config_path), "--print-summary"]) == 0
+    output_root = REPO_ROOT / "examples" / "social_smoke_output"
+    assert (output_root / "schema" / "relation_schema.final.json").exists()
+    assert (output_root / "schema" / "relation_schema.revisions.jsonl").exists()
 
 
 def test_empty_enabled_tasks_does_not_call_llm() -> None:

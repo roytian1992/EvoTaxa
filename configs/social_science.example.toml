@@ -67,6 +67,14 @@ definition = "Social, behavioral, political, economic, or institutional outcomes
 display_name = "Public Frames"
 definition = "Narratives, discourses, and issue framings."
 
+[schema]
+entity_schema_mode = "fixed"
+relation_schema_mode = "fixed"
+evidence_schema_mode = "fixed"
+schema_inference_sample_size = 30
+schema_revision_min_support = 3
+max_schema_revisions = 3
+
 [graph]
 entity_dimensions = ["mechanisms", "interventions", "measurement_strategies", "public_frames"]
 entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame"]

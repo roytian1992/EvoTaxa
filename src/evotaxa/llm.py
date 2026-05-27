@@ -220,6 +220,7 @@ def judge_edge_evidence(
     edge: dict[str, Any],
     source_text: str,
     target_text: str,
+    relation_schema: dict[str, Any] | None = None,
 ) -> LLMRecord:
     fallback = {
         "edge_type": edge.get("edge_type"),
@@ -230,15 +231,76 @@ def judge_edge_evidence(
         "rationale": "Deterministic fallback preserving cue-based extraction.",
     }
     prompt = (
-        "Audit this evolution edge. Extract bottleneck, mechanism, and tradeoff evidence from the source/target text.\n"
+        "Audit this evolution edge using the allowed relation schema. Extract bottleneck, mechanism, and tradeoff evidence from the source/target text.\n"
         "Every evidence quote must be an exact copied span from the source or target text; leave quote empty if unsupported.\n"
+        f"Allowed relation schema:\n{json.dumps(relation_schema or {}, ensure_ascii=False)}\n"
         f"Edge JSON:\n{json.dumps(edge, ensure_ascii=False)}\n"
         f"Source text:\n{source_text[:3000]}\n"
         f"Target text:\n{target_text[:3000]}\n"
         "Return JSON with edge_type, confidence, bottleneck, mechanism, tradeoff, and rationale. "
-        "Each bottleneck/mechanism/tradeoff object should include description and quote."
+        "edge_type must be one of the allowed schema keys. Each bottleneck/mechanism/tradeoff object should include description and quote."
     )
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
+
+
+def infer_relation_schema(
+    client: LLMClient,
+    *,
+    domain_id: str,
+    entity_types: list[str],
+    strong_edge_types: list[str],
+    sample_documents: list[dict[str, Any]],
+    fixed_schema: dict[str, Any],
+    max_relation_types: int,
+) -> LLMRecord:
+    fallback = {"relation_types": [{"edge_type": edge_type, **spec} for edge_type, spec in fixed_schema.items()]}
+    prompt = (
+        "Infer a domain-appropriate relation extraction schema for taxonomy-guided evolution modeling.\n"
+        "Keep the schema compact and compatible with quote-grounded evidence extraction.\n"
+        f"Domain id: {domain_id}\n"
+        f"Entity types: {entity_types}\n"
+        f"Core strong edge types to preserve unless inappropriate: {strong_edge_types}\n"
+        f"Maximum relation types: {max_relation_types}\n"
+        f"Fixed fallback schema:\n{json.dumps(fixed_schema, ensure_ascii=False)}\n"
+        f"Sample documents:\n{json.dumps(sample_documents, ensure_ascii=False)[:5000]}\n"
+        "Return JSON: {\"relation_types\": [{\"edge_type\": \"\", \"label\": \"\", \"definition\": \"\", "
+        "\"source_role\": \"\", \"target_role\": \"\", \"directionality\": \"directed\", "
+        "\"temporal_constraint\": \"none\", \"evidence_slots\": [\"mechanism\"], "
+        "\"positive_cues\": [], \"negative_cues\": [], \"counterexamples\": [], \"strong_edge\": false}]}."
+    )
+    return client.complete_json(task="relation_schema_inference", prompt=prompt, fallback=fallback)
+
+
+def infer_entity_evidence_schema(
+    client: LLMClient,
+    *,
+    domain_id: str,
+    taxonomy_dimensions: list[str],
+    configured_entity_types: list[str],
+    fixed_entity_schema: dict[str, Any],
+    fixed_evidence_schema: dict[str, Any],
+    sample_documents: list[dict[str, Any]],
+) -> LLMRecord:
+    fallback = {
+        "entity_types": [{"entity_type": entity_type, **spec} for entity_type, spec in fixed_entity_schema.items()],
+        "evidence_slots": [{"slot": slot, **spec} for slot, spec in fixed_evidence_schema.items()],
+    }
+    prompt = (
+        "Infer a compact entity and evidence schema for taxonomy-guided evolution modeling.\n"
+        "Entity types should describe domain objects worth tracking over time. Evidence slots should be quote-grounded fields needed to validate entities and relations.\n"
+        f"Domain id: {domain_id}\n"
+        f"Taxonomy dimensions: {taxonomy_dimensions}\n"
+        f"Configured entity types: {configured_entity_types}\n"
+        f"Fixed entity schema:\n{json.dumps(fixed_entity_schema, ensure_ascii=False)}\n"
+        f"Fixed evidence schema:\n{json.dumps(fixed_evidence_schema, ensure_ascii=False)}\n"
+        f"Sample documents:\n{json.dumps(sample_documents, ensure_ascii=False)[:5000]}\n"
+        "Return JSON: {\"entity_types\": [{\"entity_type\": \"\", \"definition\": \"\", "
+        "\"inclusion_criteria\": \"\", \"exclusion_criteria\": \"\", \"aliases\": [], "
+        "\"allowed_dimensions\": [], \"example_mentions\": [], \"negative_examples\": [], \"quality_rules\": []}], "
+        "\"evidence_slots\": [{\"slot\": \"\", \"definition\": \"\", \"required\": true, "
+        "\"quote_required\": true, \"allowed_source\": \"either\", \"validation\": \"substring\"}]}."
+    )
+    return client.complete_json(task="entity_evidence_schema_inference", prompt=prompt, fallback=fallback)
 
 
 def extract_document_entities(
@@ -282,6 +344,19 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
         return "accept" in output and "confidence" in output
     if task == "edge_evidence_judge":
         return "edge_type" in output and "confidence" in output
+    if task == "relation_schema_inference":
+        relation_types = output.get("relation_types")
+        if not isinstance(relation_types, list):
+            return False
+        return all(isinstance(row, dict) and row.get("edge_type") and row.get("definition") for row in relation_types)
+    if task == "entity_evidence_schema_inference":
+        entity_types = output.get("entity_types")
+        evidence_slots = output.get("evidence_slots")
+        if not isinstance(entity_types, list) or not isinstance(evidence_slots, list):
+            return False
+        valid_entities = all(isinstance(row, dict) and row.get("entity_type") and row.get("definition") for row in entity_types)
+        valid_slots = all(isinstance(row, dict) and row.get("slot") and row.get("definition") for row in evidence_slots)
+        return valid_entities and valid_slots
     if task == "entity_extraction":
         entities = output.get("entities")
         if not isinstance(entities, list):

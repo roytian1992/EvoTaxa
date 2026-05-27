@@ -24,6 +24,7 @@ from evotaxa.induction import (
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
 from evotaxa.llm import build_llm_client, extract_document_entities, judge_edge_evidence, judge_taxonomy_candidate
+from evotaxa.schema import adapt_schema_after_graph, resolve_initial_schema
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
 from evotaxa.taxonomy import build_taxonomy_events, enrich_taxonomy_nodes, judge_taxonomy_quality
@@ -72,11 +73,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
 
     llm_client = build_llm_client(config.llm)
     llm_records: list[Any] = []
+    schema_bundle = resolve_initial_schema(config, docs, nodes, llm_client)
+    llm_records.extend(schema_bundle.llm_records)
     entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count = _extract_prepare_entities(
         docs,
         assignments,
         config,
         llm_client,
+        schema_bundle,
         full=full,
         llm_records=llm_records,
     )
@@ -114,6 +118,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
                 assignments,
                 config,
                 llm_client,
+                schema_bundle,
                 full=full,
                 llm_records=llm_records,
             )
@@ -127,7 +132,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
         config,
         llm_client,
         llm_records,
+        schema_bundle,
         full=full,
+    )
+    schema_bundle, schema_revisions = adapt_schema_after_graph(
+        schema_bundle,
+        edge_evidence_audit=graph_layer["edge_evidence_audit"],
+        entity_quality_report=entity_quality_report,
+        config=config,
     )
     feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates) if full else []
     revision_candidates: list[dict[str, Any]] = []
@@ -171,6 +183,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
                 assignments,
                 config,
                 llm_client,
+                schema_bundle,
                 full=full,
                 llm_records=llm_records,
             )
@@ -182,8 +195,16 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
                 config,
                 llm_client,
                 llm_records,
+                schema_bundle,
                 full=full,
             )
+            schema_bundle, iteration_schema_revisions = adapt_schema_after_graph(
+                schema_bundle,
+                edge_evidence_audit=graph_layer["edge_evidence_audit"],
+                entity_quality_report=entity_quality_report,
+                config=config,
+            )
+            schema_revisions = [*schema_revisions, *iteration_schema_revisions]
             feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates)
             taxonomy_events = [*taxonomy_events, *_revision_application_events(revision_application_report)]
 
@@ -220,6 +241,20 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "taxonomy" / "revision_candidates.jsonl", revision_candidates)
     write_jsonl(output_root / "taxonomy" / "revision_application_report.jsonl", revision_application_report)
     write_jsonl(output_root / "taxonomy" / "coevolution_iterations.jsonl", coevolution_iteration_reports)
+
+    write_json(output_root / "schema" / "entity_schema.fixed.json", schema_bundle.fixed_entity_schema)
+    write_json(output_root / "schema" / "entity_schema.inferred.json", schema_bundle.inferred_entity_schema)
+    write_json(output_root / "schema" / "entity_schema.final.json", schema_bundle.entity_schema)
+    write_json(output_root / "schema" / "relation_schema.fixed.json", schema_bundle.fixed_relation_schema)
+    write_json(output_root / "schema" / "relation_schema.inferred.json", schema_bundle.inferred_relation_schema)
+    write_json(output_root / "schema" / "relation_schema.final.json", schema_bundle.relation_schema)
+    write_json(output_root / "schema" / "evidence_schema.fixed.json", schema_bundle.fixed_evidence_schema)
+    write_json(output_root / "schema" / "evidence_schema.inferred.json", schema_bundle.inferred_evidence_schema)
+    write_json(output_root / "schema" / "evidence_schema.final.json", schema_bundle.evidence_schema)
+    write_jsonl(output_root / "schema" / "schema_reports.jsonl", schema_bundle.reports)
+    write_jsonl(output_root / "schema" / "relation_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "relation_schema"])
+    write_jsonl(output_root / "schema" / "entity_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "entity_schema"])
+    write_jsonl(output_root / "schema" / "evidence_schema.revisions.jsonl", [row for row in schema_revisions if row.get("schema_family") == "evidence_schema"])
 
     write_jsonl(output_root / "graph" / "method_registry.jsonl", (entity.to_record() for entity in entities))
     write_jsonl(output_root / "graph" / "method_aliases.jsonl", entity_link_rows)
@@ -274,6 +309,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "revision_candidates": len(revision_candidates),
             "applied_revisions": sum(1 for row in revision_application_report if row.get("status") == "applied"),
             "coevolution_iterations": len(coevolution_iteration_reports),
+            "entity_schema_types": len(schema_bundle.entity_schema),
+            "relation_schema_types": len(schema_bundle.relation_schema),
+            "evidence_schema_slots": len(schema_bundle.evidence_schema),
+            "schema_revisions": len(schema_revisions),
             "entities": len(entities),
             "raw_entities": raw_entity_count,
             "filtered_entities": max(0, raw_entity_count - len(entities)),
@@ -305,6 +344,11 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "revision_application_report": "taxonomy/revision_application_report.jsonl",
             "coevolution_iterations": "taxonomy/coevolution_iterations.jsonl",
             "expanded_taxonomy_nodes": "taxonomy/taxonomy_nodes.expanded.json",
+            "entity_schema": "schema/entity_schema.final.json",
+            "relation_schema": "schema/relation_schema.final.json",
+            "evidence_schema": "schema/evidence_schema.final.json",
+            "schema_reports": "schema/schema_reports.jsonl",
+            "schema_revisions": "schema/",
             "method_registry": "graph/method_registry.jsonl",
             "method_aliases": "graph/method_aliases.jsonl",
             "entity_linking_report": "graph/entity_linking_report.jsonl",
@@ -332,6 +376,7 @@ def _extract_prepare_entities(
     assignments: dict[str, list[str]],
     config: EvoTaxaConfig,
     llm_client: Any,
+    schema_bundle: Any,
     *,
     full: bool,
     llm_records: list[Any],
@@ -345,7 +390,7 @@ def _extract_prepare_entities(
                 doc_id=doc.doc_id,
                 title=doc.title,
                 text=doc.text,
-                entity_types=config.graph.entity_types,
+                entity_types=list(schema_bundle.entity_schema.keys()) or config.graph.entity_types,
                 max_entities=config.graph.llm_entity_extraction_limit,
             )
             llm_records.append(record)
@@ -374,10 +419,11 @@ def _build_graph_layer(
     config: EvoTaxaConfig,
     llm_client: Any,
     llm_records: list[Any],
+    schema_bundle: Any,
     *,
     full: bool,
 ) -> dict[str, Any]:
-    edges = build_edges(docs, entities, mentions, config.graph)
+    edges = build_edges(docs, entities, mentions, config.graph, schema_bundle.relation_schema, schema_bundle.evidence_schema)
     edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
     if full and edges:
         doc_map = {doc.doc_id: doc for doc in docs}
@@ -388,6 +434,7 @@ def _build_graph_layer(
                 edge=edge.to_record(),
                 source_text=doc_map.get(edge.source_document).full_text if doc_map.get(edge.source_document) else "",
                 target_text=doc_map.get(edge.target_document).full_text if doc_map.get(edge.target_document) else "",
+                relation_schema=schema_bundle.relation_schema,
             )
             llm_records.append(record)
             judged_edges.append(_apply_edge_judgement(edge, record.output))

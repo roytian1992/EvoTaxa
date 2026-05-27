@@ -50,7 +50,7 @@ def audit_edge_evidence(
     verified_fields: list[str] = []
     missing_fields: list[str] = []
 
-    for field in EVIDENCE_FIELDS:
+    for field in _audit_fields(edge):
         value = (edge.evidence or {}).get(field) or {}
         quote = normalize_space(value.get("quote") if isinstance(value, dict) else "")
         description = normalize_space(value.get("description") if isinstance(value, dict) else "")
@@ -137,3 +137,11 @@ def _evidence_with_audit(evidence: dict[str, Any], audit: dict[str, Any]) -> dic
 
 def _doc_text(doc: Document | None) -> str:
     return doc.full_text if doc else ""
+
+
+def _audit_fields(edge: EvolutionEdge) -> list[str]:
+    fields = list((edge.evidence or {}).get("schema_slots") or [])
+    for field in EVIDENCE_FIELDS:
+        if field not in fields:
+            fields.append(field)
+    return fields
