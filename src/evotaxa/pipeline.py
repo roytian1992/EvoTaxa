@@ -80,8 +80,9 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
         full=full,
         llm_records=llm_records,
     )
-    expansion_signals = score_expansion_triggers(docs, nodes, assignments, entities) if full or config.taxonomy.expansion_enabled else []
-    expansion_candidates = propose_expansion_candidates(docs, nodes, expansion_signals, config.taxonomy) if full or config.taxonomy.expansion_enabled else []
+    expansion_enabled = config.taxonomy.expansion_enabled
+    expansion_signals = score_expansion_triggers(docs, nodes, assignments, entities) if expansion_enabled else []
+    expansion_candidates = propose_expansion_candidates(docs, nodes, expansion_signals, config.taxonomy) if expansion_enabled else []
 
     taxonomy_judgements: dict[str, dict[str, Any]] = {}
     if full and expansion_candidates:

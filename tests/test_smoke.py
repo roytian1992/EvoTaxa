@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from evotaxa.ablation import run_ablation_suite
 from evotaxa.config import load_config
 from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
@@ -89,6 +90,27 @@ def test_full_pipeline_can_induce_taxonomy_without_node_file() -> None:
     assert manifest["counts"]["taxonomy_nodes"] >= 2
     assert manifest["inputs"]["taxonomy"]["induced_from_corpus"] is True
     assert (Path(manifest["output_root"]) / "taxonomy" / "taxonomy_induction_audit.jsonl").exists()
+
+
+def test_ablation_runner_writes_summary() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    output_root = REPO_ROOT / "examples" / "social_ablation_smoke_output"
+    summary = run_ablation_suite(config, output_root=output_root, variants=["default", "no_coevolution"])
+    assert summary["best_variant_by_quality"]
+    assert len(summary["variants"]) == 2
+    assert (output_root / "ablation_summary.json").exists()
+    assert (output_root / "ablation_summary.jsonl").exists()
+    assert (output_root / "default" / "manifest.json").exists()
+    assert (output_root / "no_coevolution" / "manifest.json").exists()
+
+
+def test_no_expansion_ablation_disables_expansion() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    output_root = REPO_ROOT / "examples" / "social_no_expansion_smoke_output"
+    summary = run_ablation_suite(config, output_root=output_root, variants=["no_expansion"])
+    row = summary["variants"][0]
+    assert row["applied_expansions"] == 0
+    assert row["applied_revisions"] == 0
 
 
 def test_quote_grounded_llm_entity_mentions_are_merged() -> None:

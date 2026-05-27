@@ -222,3 +222,23 @@ Each run writes `evaluation/quality_report.json`. The report aggregates intrinsi
 - LLM schema/error/cache reliability.
 
 These metrics are intended as experiment hygiene and ablation targets. A publication-grade evaluation should still add human labels for taxonomy node validity, entity mention accuracy, relation precision, and quote grounding.
+
+## Ablation Output
+
+Use `run-ablation` to run multiple configured variants from the same base config:
+
+```bash
+python -m evotaxa.cli run-ablation \
+  --config configs/social_science.example.toml \
+  --variants default no_coevolution no_expansion no_edge_judge no_llm \
+  --print-summary
+```
+
+The suite writes:
+
+- `ablation_summary.json`,
+- `ablation_summary.jsonl`,
+- `ablation_manifests.json`,
+- one full EvoTaxa output directory per variant.
+
+Built-in variants are `default`, `no_coevolution`, `no_expansion`, `no_edge_judge`, and `no_llm`.

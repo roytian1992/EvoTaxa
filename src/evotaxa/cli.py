@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from evotaxa.ablation import DEFAULT_ABLATION_VARIANTS, run_ablation_suite
 from evotaxa.config import load_config
 from evotaxa.pipeline import run_full, run_lite
 
@@ -22,6 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     full_parser = subparsers.add_parser("run-full", help="Run taxonomy induction, expansion, graph feedback, and scoring pipeline.")
     full_parser.add_argument("--config", required=True, type=Path)
     full_parser.add_argument("--print-manifest", action="store_true")
+
+    ablation_parser = subparsers.add_parser("run-ablation", help="Run configured ablation variants and summarize results.")
+    ablation_parser.add_argument("--config", required=True, type=Path)
+    ablation_parser.add_argument("--output-root", type=Path)
+    ablation_parser.add_argument("--mode", choices=["full", "lite"], default="full")
+    ablation_parser.add_argument("--variants", nargs="*", default=list(DEFAULT_ABLATION_VARIANTS))
+    ablation_parser.add_argument("--print-summary", action="store_true")
 
     args = parser.parse_args(argv)
     if args.command == "validate-config":
@@ -55,6 +63,19 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(manifest, ensure_ascii=False, indent=2))
         else:
             print(f"Wrote EvoTaxa full artifacts to {manifest['output_root']}")
+        return 0
+
+    if args.command == "run-ablation":
+        summary = run_ablation_suite(
+            args.config,
+            output_root=args.output_root,
+            variants=args.variants,
+            mode=args.mode,
+        )
+        if args.print_summary:
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+        else:
+            print(f"Wrote EvoTaxa ablation artifacts to {summary['output_root']}")
         return 0
 
     raise ValueError(f"Unknown command: {args.command}")

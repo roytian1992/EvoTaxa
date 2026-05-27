@@ -44,6 +44,15 @@ python -m evotaxa.cli run-full \
   --print-manifest
 ```
 
+Ablation suite:
+
+```bash
+python -m evotaxa.cli run-ablation \
+  --config configs/social_science.example.toml \
+  --variants default no_coevolution no_expansion no_edge_judge no_llm \
+  --print-summary
+```
+
 Local OpenAI-compatible LLM development:
 
 ```toml
@@ -154,6 +163,8 @@ The loop writes `taxonomy/revision_candidates.jsonl`, `taxonomy/revision_applica
 ## Evaluation
 
 Every run writes `evaluation/quality_report.json`, an intrinsic quality report covering taxonomy quality, entity filtering, edge grounding, co-evolution yield, forecast hooks, and LLM reliability. This is not a substitute for a human gold-standard evaluation, but it gives each experiment a consistent health check and ablation target.
+
+`run-ablation` writes `ablation_summary.json`, `ablation_summary.jsonl`, and one run directory per variant. The default variants are `default`, `no_coevolution`, `no_expansion`, `no_edge_judge`, and `no_llm`.
 
 ## Current Scope
 

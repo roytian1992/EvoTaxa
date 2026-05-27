@@ -3,5 +3,6 @@ __pycache__/
 *.py[cod]
 
 examples/*_output/
+examples/*_output_ablations/
+examples/*_smoke_output/
 data/
-
