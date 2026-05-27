@@ -254,6 +254,38 @@ def judge_edge_evidence(
     return client.complete_json(task="edge_evidence_judge", prompt=prompt, fallback=fallback)
 
 
+def extract_relation_for_pair(
+    client: LLMClient,
+    *,
+    pair: dict[str, Any],
+    source_text: str,
+    target_text: str,
+    relation_schema: dict[str, Any],
+    evidence_schema: dict[str, Any],
+) -> LLMRecord:
+    fallback = {
+        "accept": False,
+        "edge_type": "background",
+        "confidence": 0.0,
+        "evidence": {},
+        "rationale": "Deterministic fallback: schema-guided relation extraction task was not run.",
+        "negative_rationale": "No model evidence available.",
+    }
+    prompt = (
+        "Decide whether this source-target entity pair expresses a taxonomy-guided evolution relation.\n"
+        "Use the relation schema as the closed set of allowed edge types. Prefer background or accept=false for weak co-mentions.\n"
+        "If accepted, return quote-grounded evidence for the selected relation's evidence slots. Every quote must be copied exactly from source or target text.\n"
+        f"Pair JSON:\n{json.dumps(pair, ensure_ascii=False)}\n"
+        f"Allowed relation schema:\n{json.dumps(relation_schema, ensure_ascii=False)}\n"
+        f"Evidence schema:\n{json.dumps(evidence_schema, ensure_ascii=False)}\n"
+        f"Source text:\n{source_text[:3500]}\n"
+        f"Target text:\n{target_text[:3500]}\n"
+        "Return JSON with accept, edge_type, confidence, evidence, rationale, and negative_rationale. "
+        "evidence must be an object keyed by evidence slot, each with description and quote."
+    )
+    return client.complete_json(task="relation_extraction", prompt=prompt, fallback=fallback)
+
+
 def infer_relation_schema(
     client: LLMClient,
     *,
@@ -357,6 +389,8 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
         return "edge_type" in output and "confidence" in output and (
             "evidence" in output or any(isinstance(output.get(key), dict) for key in ["bottleneck", "mechanism", "tradeoff"])
         )
+    if task == "relation_extraction":
+        return "accept" in output and "edge_type" in output and "confidence" in output and "evidence" in output
     if task == "relation_schema_inference":
         relation_types = output.get("relation_types")
         if not isinstance(relation_types, list):

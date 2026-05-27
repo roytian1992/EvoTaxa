@@ -7,7 +7,7 @@ from evotaxa.cli import main
 from evotaxa.config import load_config
 from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
-from evotaxa.llm import build_llm_client, judge_edge_evidence
+from evotaxa.llm import build_llm_client, extract_relation_for_pair, judge_edge_evidence
 from evotaxa.models import Document, EvolutionEdge
 from evotaxa.pipeline import run_full, run_lite
 
@@ -76,6 +76,7 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()
     assert (output_root / "graph" / "llm_entity_mentions.jsonl").exists()
+    assert (output_root / "graph" / "relation_extraction_report.jsonl").exists()
     assert (output_root / "graph" / "method_edges.trusted.jsonl").exists()
     assert (output_root / "graph" / "method_edges.candidate.jsonl").exists()
     assert (output_root / "graph" / "method_edges.unverified.jsonl").exists()
@@ -92,6 +93,7 @@ def test_local_llm_config_shape_is_supported() -> None:
     assert config.llm.api_key == "token-abc123"
     assert config.llm.base_url == "http://localhost:8001/v1"
     assert "entity_extraction" in config.llm.enabled_tasks
+    assert "relation_extraction" in config.llm.enabled_tasks
 
 
 def test_schema_modes_are_configurable() -> None:
@@ -133,6 +135,30 @@ def test_dynamic_edge_judge_uses_schema_slots() -> None:
     )
     assert set(record.output["evidence"]) == {"mechanism", "implementation_context"}
     assert record.output["implementation_context"]["quote"] == "API calls"
+
+
+def test_relation_extraction_task_shape_is_supported() -> None:
+    config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
+    client = build_llm_client(config.llm)
+    pair = {
+        "source_entity": {"entity_id": "method__react", "canonical_name": "ReAct"},
+        "target_entity": {"entity_id": "method__toolformer", "canonical_name": "Toolformer"},
+        "source_document": "P1",
+        "target_document": "P2",
+        "taxonomy_nodes": ["methodologies__agents"],
+        "time_delta_days": 30,
+    }
+    record = extract_relation_for_pair(
+        client,
+        pair=pair,
+        source_text="ReAct introduced tool-use reasoning.",
+        target_text="Toolformer adapts tool-use reasoning to API calls.",
+        relation_schema={"adapts": {"definition": "Transfer to a new context.", "evidence_slots": ["mechanism"]}},
+        evidence_schema={"mechanism": {"definition": "Mechanism.", "required": True}},
+    )
+    assert record.output["accept"] is False
+    assert record.output["edge_type"] == "background"
+    assert "negative_rationale" in record.output
 
 
 def test_empty_enabled_tasks_does_not_call_llm() -> None:

@@ -12,7 +12,16 @@ from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonic
 from evotaxa.entity_quality import filter_entities_by_quality
 from evotaxa.evaluation import build_quality_report
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
-from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities, merge_llm_entity_mentions
+from evotaxa.graph import (
+    aggregate_edges,
+    build_edges,
+    build_relation_extraction_pairs,
+    edge_from_relation_extraction,
+    entity_frequency_summary,
+    extract_entities,
+    merge_edges_by_confidence,
+    merge_llm_entity_mentions,
+)
 from evotaxa.hooks import build_forecast_hooks, build_social_analysis_hooks
 from evotaxa.induction import (
     apply_expansion_candidates,
@@ -23,7 +32,7 @@ from evotaxa.induction import (
 )
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
-from evotaxa.llm import build_llm_client, extract_document_entities, judge_edge_evidence, judge_taxonomy_candidate
+from evotaxa.llm import build_llm_client, extract_document_entities, extract_relation_for_pair, judge_edge_evidence, judge_taxonomy_candidate
 from evotaxa.schema import adapt_schema_after_graph, resolve_initial_schema
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
@@ -263,6 +272,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "graph" / "entity_quality_report.jsonl", entity_quality_report)
     write_jsonl(output_root / "graph" / "llm_entity_mentions.jsonl", llm_entity_report)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
+    write_jsonl(output_root / "graph" / "relation_extraction_report.jsonl", graph_layer["relation_extraction_report"])
     write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in graph_layer["edges"]))
     write_jsonl(output_root / "graph" / "method_edges.trusted.jsonl", (edge.to_record() for edge in graph_layer["trusted_edges"]))
     write_jsonl(output_root / "graph" / "method_edges.candidate.jsonl", (edge.to_record() for edge in graph_layer["candidate_edges"]))
@@ -320,6 +330,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "filtered_entities": max(0, raw_entity_count - len(entities)),
             "entity_link_records": len(entity_link_rows),
             "llm_entity_mentions": sum(1 for row in llm_entity_report if row.get("status") == "accepted"),
+            "llm_relation_pairs": len(graph_layer["relation_extraction_report"]),
+            "llm_relation_edges": sum(1 for row in graph_layer["relation_extraction_report"] if row.get("accepted")),
             "mentions": len(mentions),
             "paper_level_edges": len(graph_layer["edges"]),
             "trusted_edges": len(graph_layer["trusted_edges"]),
@@ -357,6 +369,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "entity_linking_report": "graph/entity_linking_report.jsonl",
             "entity_quality_report": "graph/entity_quality_report.jsonl",
             "llm_entity_mentions": "graph/llm_entity_mentions.jsonl",
+            "relation_extraction_report": "graph/relation_extraction_report.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
             "trusted_method_edges": "graph/method_edges.trusted.jsonl",
             "candidate_method_edges": "graph/method_edges.candidate.jsonl",
@@ -428,6 +441,18 @@ def _build_graph_layer(
 ) -> dict[str, Any]:
     edges = build_edges(docs, entities, mentions, config.graph, schema_bundle.relation_schema, schema_bundle.evidence_schema)
     edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
+    relation_extraction_report: list[dict[str, Any]] = []
+    if full and config.graph.llm_relation_extraction_limit > 0:
+        extracted_edges, relation_extraction_report = _extract_schema_guided_edges(
+            docs,
+            entities,
+            config,
+            llm_client,
+            llm_records,
+            schema_bundle,
+        )
+        extracted_edges = remap_edges_to_canonical_entities(extracted_edges, entity_link_rows)
+        edges = merge_edges_by_confidence([*extracted_edges, *edges])
     if full and edges:
         doc_map = {doc.doc_id: doc for doc in docs}
         judged_edges = []
@@ -458,12 +483,69 @@ def _build_graph_layer(
         "candidate_edges": candidate_edges,
         "unverified_edges": unverified_edges,
         "edge_evidence_audit": edge_evidence_audit,
+        "relation_extraction_report": relation_extraction_report,
         "downstream_edges": downstream_edges,
         "aggregated_edges": aggregated_edges,
         "chains": chains,
         "branch_points": branch_points,
         "forecast_hooks": forecast_hooks,
     }
+
+
+def _extract_schema_guided_edges(
+    docs: list[Any],
+    entities: list[Any],
+    config: EvoTaxaConfig,
+    llm_client: Any,
+    llm_records: list[Any],
+    schema_bundle: Any,
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    doc_map = {doc.doc_id: doc for doc in docs}
+    pairs = build_relation_extraction_pairs(
+        docs,
+        entities,
+        config.graph,
+        limit=max(0, config.graph.llm_relation_extraction_limit),
+    )
+    edges = []
+    report: list[dict[str, Any]] = []
+    for index, pair in enumerate(pairs):
+        source_doc = doc_map.get(str(pair.get("source_document") or ""))
+        target_doc = doc_map.get(str(pair.get("target_document") or ""))
+        record = extract_relation_for_pair(
+            llm_client,
+            pair=pair,
+            source_text=source_doc.full_text if source_doc else "",
+            target_text=target_doc.full_text if target_doc else "",
+            relation_schema=schema_bundle.relation_schema,
+            evidence_schema=schema_bundle.evidence_schema,
+        )
+        llm_records.append(record)
+        edge = edge_from_relation_extraction(
+            pair,
+            record.output,
+            relation_schema=schema_bundle.relation_schema,
+            evidence_schema=schema_bundle.evidence_schema,
+        )
+        report.append(
+            {
+                "pair_index": index,
+                "source_entity": (pair.get("source_entity") or {}).get("entity_id"),
+                "target_entity": (pair.get("target_entity") or {}).get("entity_id"),
+                "source_document": pair.get("source_document"),
+                "target_document": pair.get("target_document"),
+                "accepted": edge is not None,
+                "edge_id": edge.edge_id if edge else "",
+                "edge_type": record.output.get("edge_type"),
+                "confidence": record.output.get("confidence"),
+                "used_model": record.used_model,
+                "error": record.error,
+                "rationale": record.output.get("rationale") or record.output.get("negative_rationale") or "",
+            }
+        )
+        if edge is not None:
+            edges.append(edge)
+    return edges, report
 
 
 def _merge_assignments(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:

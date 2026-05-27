@@ -73,7 +73,7 @@ provider = "openai_compat"
 model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "relation_extraction", "edge_evidence_judge"]
 ```
 
 For committed configs, prefer `api_key_env` instead of a literal token.
@@ -126,6 +126,7 @@ Each run writes:
     entity_quality_report.jsonl
     llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
+    relation_extraction_report.jsonl
     method_edges.paper_level.jsonl
     method_edges.trusted.jsonl
     method_edges.candidate.jsonl
@@ -178,6 +179,8 @@ EvoTaxa treats schema as a versioned artifact. `[schema]` supports:
 - `adaptive`: infer or load a schema, propose revision candidates from entity filtering and edge evidence audit signals, then promote bounded revisions.
 
 The relation schema is injected into edge construction and LLM edge judging. The entity schema constrains quote-grounded entity extraction. The evidence schema defines which quote-backed slots are audited. Each run writes fixed, inferred, final, candidate, and promoted revision artifacts under `schema/`.
+
+In `run-full`, enabling `relation_extraction` lets the model create schema-guided relation edges from candidate entity pairs before the evidence judge audits them. Cue-based edges remain as a deterministic fallback and prior.
 
 ## Edge Evidence
 

@@ -199,6 +199,98 @@ def build_edges(
     return sorted(edges.values(), key=lambda edge: (-edge.confidence, edge.edge_id))
 
 
+def build_relation_extraction_pairs(
+    docs: list[Document],
+    entities: list[EvolutionEntity],
+    config: GraphConfig,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    doc_map = {doc.doc_id: doc for doc in docs}
+    entities_by_node: dict[str, list[EvolutionEntity]] = defaultdict(list)
+    for entity in entities:
+        for node_id in entity.taxonomy_nodes or ["__global__"]:
+            entities_by_node[node_id].append(entity)
+
+    pairs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for node_id, local_entities in entities_by_node.items():
+        ordered = sorted(local_entities, key=lambda entity: (entity.first_seen_date or "9999", entity.entity_id))
+        for source, target in itertools.permutations(ordered, 2):
+            if source.entity_id == target.entity_id:
+                continue
+            for source_doc, target_doc in _candidate_document_pairs(source, target, doc_map)[: config.max_edge_candidates_per_entity]:
+                key = (source.entity_id, target.entity_id, source_doc.doc_id, target_doc.doc_id, node_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                pairs.append(
+                    {
+                        "source_entity": source.to_record(),
+                        "target_entity": target.to_record(),
+                        "source_document": source_doc.doc_id,
+                        "target_document": target_doc.doc_id,
+                        "taxonomy_nodes": [] if node_id == "__global__" else [node_id],
+                        "time_delta_days": _time_delta(source_doc.published_at, target_doc.published_at),
+                    }
+                )
+                if limit > 0 and len(pairs) >= limit:
+                    return pairs
+    return pairs
+
+
+def edge_from_relation_extraction(
+    pair: dict[str, Any],
+    output: dict[str, Any],
+    *,
+    relation_schema: dict[str, dict[str, Any]] | None,
+    evidence_schema: dict[str, dict[str, Any]] | None,
+) -> EvolutionEdge | None:
+    if not bool(output.get("accept")):
+        return None
+    edge_type = str(output.get("edge_type") or "background")
+    if relation_schema and edge_type not in relation_schema:
+        edge_type = "background"
+    confidence = _safe_float(output.get("confidence"), default=0.0)
+    if confidence <= 0.0:
+        return None
+    source = pair.get("source_entity") or {}
+    target = pair.get("target_entity") or {}
+    source_entity_id = str(source.get("entity_id") or "")
+    target_entity_id = str(target.get("entity_id") or "")
+    target_doc_id = str(pair.get("target_document") or "")
+    if not source_entity_id or not target_entity_id or not target_doc_id:
+        return None
+    evidence = _extracted_evidence(output, relation_schema, evidence_schema, edge_type)
+    if output.get("rationale"):
+        evidence["extractor_rationale"] = str(output["rationale"])
+    if output.get("negative_rationale"):
+        evidence["negative_rationale"] = str(output["negative_rationale"])
+    edge_id = f"{slugify(edge_type)}__{slugify(source_entity_id)}__{slugify(target_entity_id)}__{slugify(target_doc_id)}"
+    return EvolutionEdge(
+        edge_id=edge_id,
+        source_entity=source_entity_id,
+        target_entity=target_entity_id,
+        edge_type=edge_type,
+        source_document=str(pair.get("source_document") or ""),
+        target_document=target_doc_id,
+        time_delta_days=pair.get("time_delta_days") if isinstance(pair.get("time_delta_days"), int) else None,
+        taxonomy_nodes=[str(node_id) for node_id in pair.get("taxonomy_nodes") or [] if str(node_id)],
+        confidence=round(min(0.99, max(0.0, confidence)), 3),
+        evidence=evidence,
+        substring_verified=False,
+    )
+
+
+def merge_edges_by_confidence(edges: list[EvolutionEdge]) -> list[EvolutionEdge]:
+    merged: dict[str, EvolutionEdge] = {}
+    for edge in edges:
+        existing = merged.get(edge.edge_id)
+        if existing is None or edge.confidence > existing.confidence:
+            merged[edge.edge_id] = edge
+    return sorted(merged.values(), key=lambda edge: (-edge.confidence, edge.edge_id))
+
+
 def _initial_edge_evidence(
     *,
     source: EvolutionEntity,
@@ -249,6 +341,28 @@ def _initial_edge_evidence(
                 "quote": evidence_sentence if required == "mechanism" else "",
             },
         )
+    return evidence
+
+
+def _extracted_evidence(
+    output: dict[str, Any],
+    relation_schema: dict[str, dict[str, Any]] | None,
+    evidence_schema: dict[str, dict[str, Any]] | None,
+    edge_type: str,
+) -> dict[str, Any]:
+    slots = list(((relation_schema or {}).get(edge_type) or {}).get("evidence_slots") or [])
+    if not slots:
+        slots = list((evidence_schema or {}).keys()) or ["mechanism"]
+    evidence: dict[str, Any] = {"cue": "llm_schema_extractor", "schema_slots": slots}
+    raw_evidence = output.get("evidence") if isinstance(output.get("evidence"), dict) else {}
+    for slot in slots:
+        value = raw_evidence.get(slot) if isinstance(raw_evidence.get(slot), dict) else output.get(slot)
+        if isinstance(value, dict):
+            evidence[slot] = value
+        else:
+            evidence[slot] = {"description": "", "quote": ""}
+    for required in ["bottleneck", "mechanism", "tradeoff"]:
+        evidence.setdefault(required, {"description": "", "quote": ""})
     return evidence
 
 
@@ -431,6 +545,13 @@ def _edge_confidence(
     if delta is not None and delta >= 0:
         confidence += 0.1
     return min(0.95, confidence)
+
+
+def _safe_float(value: Any, *, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _time_delta(source_date: date | None, target_date: date | None) -> int | None:
