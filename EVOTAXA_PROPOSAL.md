@@ -320,6 +320,134 @@ The substring verification rule is important:
 
 Unverified edges may remain in a candidate file, but they should not be used as gold evidence or high-confidence forecast hooks.
 
+### Adaptive Schema Evolution
+
+For cross-domain transfer, EvoTaxa should treat schemas as first-class evolving artifacts, not fixed prompt text. Two schema families should evolve together:
+
+- `relation_schema`: what edge types exist, what they mean, which entity pairs they allow, and what evidence is required.
+- `entity_evidence_schema`: what domain entities can be extracted and which evidence slots must ground them.
+
+Each schema family supports three modes:
+
+- `fixed`: use a human-provided schema from config. This is the comparability anchor for benchmarks and ablations.
+- `inferred`: ask the model to infer a domain-specific schema from corpus samples, taxonomy nodes, and seed examples before extraction starts.
+- `adaptive`: start from a fixed or inferred schema, then revise it using extraction failures, unverified quotes, low-confidence edges, duplicated entity types, and taxonomy-graph feedback.
+
+Recommended config contract:
+
+```toml
+[schema]
+entity_schema_mode = "fixed"     # fixed | inferred | adaptive
+relation_schema_mode = "fixed"   # fixed | inferred | adaptive
+evidence_schema_mode = "fixed"   # fixed | inferred | adaptive
+schema_seed_path = "configs/schemas/<domain>.json"
+schema_inference_sample_size = 30
+schema_revision_min_support = 3
+max_schema_revisions = 3
+```
+
+All schema changes must be versioned. A run should never silently overwrite a schema; it should write a candidate revision, a diff, support examples, and a promotion decision.
+
+#### Relation Schema Evolution
+
+The relation schema generalizes the current MEG-style edge vocabulary. A relation type should not be only a label such as `improves`; it should be a structured contract:
+
+```json
+{
+  "edge_type": "improves",
+  "label": "Improves",
+  "definition": "",
+  "source_role": "newer mechanism",
+  "target_role": "older mechanism",
+  "allowed_source_entity_types": [],
+  "allowed_target_entity_types": [],
+  "directionality": "directed",
+  "temporal_constraint": "source_after_target",
+  "evidence_slots": ["bottleneck", "mechanism", "tradeoff"],
+  "positive_cues": [],
+  "negative_cues": [],
+  "counterexamples": [],
+  "strong_edge": true,
+  "confidence": 0.0,
+  "schema_source": "fixed|inferred|adaptive"
+}
+```
+
+Default AI-research relation types can remain:
+
+```text
+extends, improves, replaces, adapts, uses_component, compares, background
+```
+
+But a social-science run may infer or promote relation types such as:
+
+```text
+diffuses_to, institutionalizes, reframes, operationalizes, mediates, moderates, evaluates, contests
+```
+
+The evolution loop is:
+
+1. Load the fixed relation schema from config.
+2. Sample documents, taxonomy nodes, entity mentions, and candidate pairs.
+3. Infer candidate relation types and definitions when `relation_schema_mode = inferred`.
+4. Normalize the candidate schema against hard constraints: no duplicate labels, clear directionality, allowed entity roles, required evidence slots.
+5. Use the schema inside relation extraction and edge-evidence judging prompts.
+6. Audit outputs: trusted edges, candidate edges, rejected edges, relation confusion, and unverified evidence.
+7. In adaptive mode, propose schema revisions: add relation type, merge relation types, split ambiguous relation type, rename unclear type, or tighten evidence requirements.
+8. Promote only revisions with enough support and write them as a new schema version.
+
+This gives us two useful experimental settings: a stable fixed-schema graph for fair comparison, and an adaptive-schema graph for domain transfer.
+
+#### Entity and Evidence Schema Evolution
+
+Entity and evidence schemas should evolve for the same reason. AI papers and social-science texts do not expose the same objects. In AI research, the important entities may be architectures, training recipes, retrieval strategies, datasets, and evaluation protocols. In social science, they may be policy instruments, institutions, interventions, populations, public frames, mechanisms, outcomes, and measurement strategies.
+
+An entity schema entry should look like:
+
+```json
+{
+  "entity_type": "policy_instrument",
+  "definition": "",
+  "inclusion_criteria": "",
+  "exclusion_criteria": "",
+  "aliases": [],
+  "allowed_dimensions": [],
+  "example_mentions": [],
+  "negative_examples": [],
+  "quality_rules": []
+}
+```
+
+An evidence schema entry should look like:
+
+```json
+{
+  "slot": "intervention_mechanism",
+  "definition": "",
+  "required": true,
+  "quote_required": true,
+  "allowed_source": "source|target|either",
+  "validation": "substring|semantic_overlap|human_audit"
+}
+```
+
+The adaptive loop uses extraction behavior as feedback:
+
+- If many high-quality mentions are repeatedly rejected as `unknown`, propose a new entity type.
+- If two entity types frequently collapse to the same canonical names, propose a merge.
+- If an entity type has weak boundary clarity, add exclusion criteria and negative examples.
+- If edge evidence often lacks a required quote, tighten the evidence slot or downgrade that relation type.
+- If a social-science domain repeatedly expresses actor, context, intervention, and outcome but the current evidence schema only asks for bottleneck and mechanism, propose domain-specific slots.
+
+For example, an AI-governance pilot may infer:
+
+```text
+entity types: model_risk_frame, audit_mechanism, regulatory_instrument, accountability_actor, compliance_metric
+evidence slots: problem_definition, governance_mechanism, institutional_context, observed_outcome, tradeoff
+```
+
+This is the safer design than a fully free-form agent: the model can infer and revise schemas, but every revision is constrained, persisted, evaluated, and comparable against a fixed baseline.
+
 ## 8. Layer 5: Taxonomy-Graph Feedback Loop
 
 Taxonomy and evolution graph should not be independent modules.
@@ -441,6 +569,16 @@ data/evotaxa/<run_id>/
     taxonomy_events.jsonl
     paper_assignments.enriched.jsonl
     node_quality_scores.jsonl
+  schema/
+    relation_schema.fixed.json
+    relation_schema.inferred.json
+    relation_schema.revisions.jsonl
+    relation_schema.final.json
+    entity_schema.fixed.json
+    entity_schema.inferred.json
+    entity_schema.revisions.jsonl
+    entity_schema.final.json
+    evidence_schema.final.json
   graph/
     method_registry.jsonl
     method_aliases.jsonl
@@ -617,10 +755,17 @@ Scope:
 - Only cutoff-visible papers.
 - Use title, abstract, and available full text.
 - Start with node-local candidate pairs before global citation resolution.
+- Add fixed, inferred, and adaptive modes for relation schema.
+- Add configurable entity and evidence schema for cross-domain extraction.
+- Persist schema versions, diffs, and promotion decisions.
 
 Deliverables:
 
 ```text
+schema/relation_schema.final.json
+schema/entity_schema.final.json
+schema/evidence_schema.final.json
+schema/relation_schema.revisions.jsonl
 method_registry.jsonl
 paper_method_mentions.jsonl
 method_edges.paper_level.jsonl
@@ -712,6 +857,11 @@ src/evotaxa/
   taxonomy_enrichment.py
   taxonomy_judge.py
   taxonomy_events.py
+  schema_registry.py
+  schema_inference.py
+  schema_adaptation.py
+  relation_schema.py
+  entity_schema.py
   graph_entities.py
   graph_edges.py
   evidence_validation.py
@@ -725,6 +875,8 @@ Recommended scripts:
 scripts/evotaxa/enrich_taxonomy_nodes.py
 scripts/evotaxa/judge_taxonomy_quality.py
 scripts/evotaxa/build_taxonomy_events.py
+scripts/evotaxa/infer_schema.py
+scripts/evotaxa/adapt_schema.py
 scripts/evotaxa/extract_method_entities.py
 scripts/evotaxa/build_method_edges.py
 scripts/evotaxa/validate_evidence_records.py

@@ -327,6 +327,136 @@ substring verification 非常重要：
 
 未验证的边可以保留在 candidate 文件里，但不能作为 gold evidence 或高置信 forecast hook 使用。
 
+### Adaptive Schema Evolution
+
+为了让 EvoTaxa 真正迁移到 social science，schema 不能只是 prompt 里写死的一段标签说明。我们应该把 schema 本身也当作可演化对象。
+
+这里重点有两类 schema：
+
+- `relation_schema`：定义有哪些关系类型、每种关系是什么意思、允许哪些 entity pair、需要哪些证据槽位。
+- `entity_evidence_schema`：定义一个领域里可以抽取哪些实体类型，以及这些实体和关系必须由哪些 evidence slots 支撑。
+
+每类 schema 都应该支持三种模式：
+
+- `fixed`：使用配置文件里人工写好的 schema。这是 benchmark 和 ablation 的比较锚点。
+- `inferred`：在正式抽取前，让 LLM/agent 根据语料样本、taxonomy nodes 和少量 seed examples 推断领域 schema。
+- `adaptive`：先从 fixed 或 inferred schema 启动，再根据抽取失败、quote 验证失败、低置信边、重复实体类型、taxonomy-graph feedback 生成 schema revision。
+
+推荐配置契约：
+
+```toml
+[schema]
+entity_schema_mode = "fixed"     # fixed | inferred | adaptive
+relation_schema_mode = "fixed"   # fixed | inferred | adaptive
+evidence_schema_mode = "fixed"   # fixed | inferred | adaptive
+schema_seed_path = "configs/schemas/<domain>.json"
+schema_inference_sample_size = 30
+schema_revision_min_support = 3
+max_schema_revisions = 3
+```
+
+关键约束是：schema 可以进化，但不能静默漂移。每次变化都要写出版本、diff、支持样例和是否 promote 的决策。
+
+#### Relation Schema Evolution
+
+relation schema 是对当前 MEG-style edge vocabulary 的增强。关系类型不能只是 `improves` 这种字符串，而应该是一个结构化契约：
+
+```json
+{
+  "edge_type": "improves",
+  "label": "Improves",
+  "definition": "",
+  "source_role": "newer mechanism",
+  "target_role": "older mechanism",
+  "allowed_source_entity_types": [],
+  "allowed_target_entity_types": [],
+  "directionality": "directed",
+  "temporal_constraint": "source_after_target",
+  "evidence_slots": ["bottleneck", "mechanism", "tradeoff"],
+  "positive_cues": [],
+  "negative_cues": [],
+  "counterexamples": [],
+  "strong_edge": true,
+  "confidence": 0.0,
+  "schema_source": "fixed|inferred|adaptive"
+}
+```
+
+AI research 场景下，默认关系类型可以保持：
+
+```text
+extends, improves, replaces, adapts, uses_component, compares, background
+```
+
+但 social science 场景下，系统可以推断或 promote 更贴近领域的关系类型，例如：
+
+```text
+diffuses_to, institutionalizes, reframes, operationalizes, mediates, moderates, evaluates, contests
+```
+
+演化流程如下：
+
+1. 从配置文件读取固定 relation schema。
+2. 采样 documents、taxonomy nodes、entity mentions 和 candidate pairs。
+3. 如果 `relation_schema_mode = inferred`，先推断候选关系类型、定义和证据要求。
+4. 对候选 schema 做规范化：不能有重复 label，必须有清晰 directionality，必须定义 source/target role，必须声明 evidence slots。
+5. 把 schema 注入 relation extraction 和 edge-evidence judging prompt。
+6. 审计输出：trusted edges、candidate edges、rejected edges、relation confusion、unverified evidence。
+7. 如果是 adaptive 模式，提出 schema revision：新增关系、合并关系、拆分含混关系、重命名关系、收紧证据要求。
+8. 只有达到支持阈值的 revision 才能 promote，并写成新的 schema version。
+
+这样我们会同时拥有两种实验设置：固定 schema 的图用于公平比较，自适应 schema 的图用于跨领域迁移。
+
+#### Entity and Evidence Schema Evolution
+
+entity schema 和 evidence schema 也应该演化。AI paper 和 social science 文本暴露出来的对象并不一样。AI research 中重要实体可能是 architecture、training recipe、retrieval strategy、dataset、evaluation protocol；social science 中重要实体可能是 policy instrument、institution、intervention、population、public frame、mechanism、outcome、measurement strategy。
+
+一个 entity schema entry 可以是：
+
+```json
+{
+  "entity_type": "policy_instrument",
+  "definition": "",
+  "inclusion_criteria": "",
+  "exclusion_criteria": "",
+  "aliases": [],
+  "allowed_dimensions": [],
+  "example_mentions": [],
+  "negative_examples": [],
+  "quality_rules": []
+}
+```
+
+一个 evidence schema entry 可以是：
+
+```json
+{
+  "slot": "intervention_mechanism",
+  "definition": "",
+  "required": true,
+  "quote_required": true,
+  "allowed_source": "source|target|either",
+  "validation": "substring|semantic_overlap|human_audit"
+}
+```
+
+这一层的反馈来自抽取行为本身：
+
+- 如果大量高质量 mention 被反复归为 `unknown`，提出新增 entity type。
+- 如果两个 entity type 经常 canonical 到同一组名称，提出 merge。
+- 如果某个 entity type 边界不清，增加 exclusion criteria 和 negative examples。
+- 如果某类 edge 的 required quote 经常找不到，收紧 evidence slot 或降低该 relation type 的置信等级。
+- 如果 social-science 文本反复表达 actor、context、intervention、outcome，而当前 evidence schema 只要求 bottleneck 和 mechanism，就提出领域 evidence slots。
+
+例如 AI governance pilot 可能推断出：
+
+```text
+entity types: model_risk_frame, audit_mechanism, regulatory_instrument, accountability_actor, compliance_metric
+evidence slots: problem_definition, governance_mechanism, institutional_context, observed_outcome, tradeoff
+```
+
+这个设计比完全自由的 agent 更稳：LLM 可以推断和修订 schema，但每次修订都必须被约束、落盘、评估，并且能和 fixed baseline 做对比。
+
 ## 8. Layer 5：Taxonomy-Graph Feedback Loop
 
 taxonomy 和 evolution graph 不应该是两个独立模块。
@@ -448,6 +578,16 @@ data/evotaxa/<run_id>/
     taxonomy_events.jsonl
     document_assignments.enriched.jsonl
     node_quality_scores.jsonl
+  schema/
+    relation_schema.fixed.json
+    relation_schema.inferred.json
+    relation_schema.revisions.jsonl
+    relation_schema.final.json
+    entity_schema.fixed.json
+    entity_schema.inferred.json
+    entity_schema.revisions.jsonl
+    entity_schema.final.json
+    evidence_schema.final.json
   graph/
     method_registry.jsonl
     method_aliases.jsonl
@@ -626,10 +766,17 @@ llm_agent
 - 只使用 cutoff-visible documents。
 - 使用 title、abstract 和可用 full text。
 - 先从 node-local candidate pairs 开始，而不是一上来做 global citation resolution。
+- 加入 relation schema 的 fixed、inferred、adaptive 三种模式。
+- 加入可配置的 entity schema 和 evidence schema，支持跨领域抽取。
+- 保存 schema 版本、diff 和 promotion decision。
 
 Deliverables：
 
 ```text
+schema/relation_schema.final.json
+schema/entity_schema.final.json
+schema/evidence_schema.final.json
+schema/relation_schema.revisions.jsonl
 method_registry.jsonl
 paper_method_mentions.jsonl
 method_edges.paper_level.jsonl
@@ -723,6 +870,7 @@ src/evotaxa/
   loaders.py
   models.py
   taxonomy.py
+  schema.py
   graph.py
   search.py
   hooks.py
@@ -737,6 +885,11 @@ src/evotaxa/
   taxonomy_enrichment.py
   taxonomy_judge.py
   taxonomy_events.py
+  schema_registry.py
+  schema_inference.py
+  schema_adaptation.py
+  relation_schema.py
+  entity_schema.py
   graph_entities.py
   graph_edges.py
   evidence_validation.py
@@ -750,6 +903,8 @@ src/evotaxa/
 evotaxa validate-config --config configs/<domain>.toml
 evotaxa run-lite --config configs/<domain>.toml
 evotaxa enrich-taxonomy --config configs/<domain>.toml
+evotaxa infer-schema --config configs/<domain>.toml
+evotaxa adapt-schema --config configs/<domain>.toml
 evotaxa build-graph --config configs/<domain>.toml
 evotaxa search-lineage --config configs/<domain>.toml
 evotaxa build-hooks --config configs/<domain>.toml
@@ -855,4 +1010,3 @@ Goal: build MEG-lite and forecast_hooks.jsonl
 8. 人工审计这些 hooks 是否优于当前 cue-based method evolution assets。
 
 这是证明 EvoTaxa 是真实算法升级，而不是简单 rebranding 的最短路径。
-
