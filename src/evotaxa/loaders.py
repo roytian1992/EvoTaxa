@@ -116,9 +116,7 @@ def _flatten_nested_taxonomy(value: Any) -> list[dict[str, Any]]:
 def load_taxonomy_nodes(config: EvoTaxaConfig, *, previous: bool = False) -> tuple[list[TaxonomyNode], dict[str, Any]]:
     path = config.taxonomy.previous_nodes_path if previous else config.taxonomy.nodes_path
     if path is None:
-        if previous:
-            return [], {"path": None, "loaded_nodes": 0}
-        raise ValueError("taxonomy.nodes_path is required")
+        return [], {"path": None, "loaded_nodes": 0}
 
     raw = read_json_or_jsonl(path)
     raw_rows = _flatten_nested_taxonomy(raw)
@@ -254,4 +252,3 @@ def attach_node_support(
             )
         )
     return output
-

@@ -52,6 +52,14 @@ class TaxonomyConfig:
     assignment_doc_id_fields: list[str] = field(default_factory=lambda: ["doc_id", "paper_id", "id"])
     assignment_node_id_fields: list[str] = field(default_factory=lambda: ["node_ids", "taxonomy_nodes", "assigned_node_ids"])
     assignment_dimension_map_fields: list[str] = field(default_factory=lambda: ["dimension_assignments"])
+    induction_enabled: bool = False
+    expansion_enabled: bool = True
+    max_induced_nodes_per_dimension: int = 8
+    min_cluster_documents: int = 2
+    expansion_threshold: float = 0.55
+    width_threshold: float = 0.65
+    depth_threshold: float = 0.65
+    max_expansion_candidates: int = 50
 
 
 @dataclass
@@ -96,12 +104,25 @@ class ProjectConfig:
 
 
 @dataclass
+class LLMConfig:
+    provider: str = "deterministic"
+    model: str = ""
+    api_key: str = ""
+    api_key_env: str = "OPENAI_API_KEY"
+    base_url: str = ""
+    enabled_tasks: list[str] = field(default_factory=list)
+    timeout_seconds: int = 120
+    temperature: float = 0.0
+
+
+@dataclass
 class EvoTaxaConfig:
     path: Path
     project: ProjectConfig
     corpus: CorpusConfig
     taxonomy: TaxonomyConfig
     graph: GraphConfig
+    llm: LLMConfig
     output: OutputConfig
 
 
@@ -169,6 +190,7 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
     corpus_raw = raw.get("corpus") or {}
     taxonomy_raw = raw.get("taxonomy") or {}
     graph_raw = raw.get("graph") or {}
+    llm_raw = raw.get("llm") or {}
     output_raw = raw.get("output") or {}
 
     corpus = CorpusConfig(
@@ -202,6 +224,14 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         assignment_doc_id_fields=_list(taxonomy_raw, "assignment_doc_id_fields", TaxonomyConfig(None).assignment_doc_id_fields),
         assignment_node_id_fields=_list(taxonomy_raw, "assignment_node_id_fields", TaxonomyConfig(None).assignment_node_id_fields),
         assignment_dimension_map_fields=_list(taxonomy_raw, "assignment_dimension_map_fields", TaxonomyConfig(None).assignment_dimension_map_fields),
+        induction_enabled=bool(taxonomy_raw.get("induction_enabled") or False),
+        expansion_enabled=bool(taxonomy_raw.get("expansion_enabled", True)),
+        max_induced_nodes_per_dimension=int(taxonomy_raw.get("max_induced_nodes_per_dimension") or 8),
+        min_cluster_documents=int(taxonomy_raw.get("min_cluster_documents") or 2),
+        expansion_threshold=float(taxonomy_raw.get("expansion_threshold") or 0.55),
+        width_threshold=float(taxonomy_raw.get("width_threshold") or 0.65),
+        depth_threshold=float(taxonomy_raw.get("depth_threshold") or 0.65),
+        max_expansion_candidates=int(taxonomy_raw.get("max_expansion_candidates") or 50),
     )
 
     graph = GraphConfig(
@@ -229,6 +259,15 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         corpus=corpus,
         taxonomy=taxonomy,
         graph=graph,
+        llm=LLMConfig(
+            provider=str(llm_raw.get("provider") or ("openai_compat" if llm_raw.get("base_url") else "deterministic")),
+            model=str(llm_raw.get("model") or llm_raw.get("model_name") or ""),
+            api_key=str(llm_raw.get("api_key") or ""),
+            api_key_env=str(llm_raw.get("api_key_env") or "OPENAI_API_KEY"),
+            base_url=str(llm_raw.get("base_url") or ""),
+            enabled_tasks=_list(llm_raw, "enabled_tasks", []),
+            timeout_seconds=int(llm_raw.get("timeout_seconds") or 120),
+            temperature=float(llm_raw.get("temperature") or 0.0),
+        ),
         output=OutputConfig(root=_resolve_path(base, output_raw.get("root")) or Path("data/evotaxa/run_lite")),
     )
-

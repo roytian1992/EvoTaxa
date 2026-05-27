@@ -1,0 +1,47 @@
+[project]
+name = "EvoTaxa Induction-Only Smoke"
+domain_id = "induction_smoke"
+run_id = "induction_only"
+
+[corpus]
+path = "../tests/fixtures/social/corpus.jsonl"
+source_type = "social_document"
+id_fields = ["doc_id", "id"]
+title_fields = ["title"]
+text_fields = ["summary", "text"]
+date_fields = ["publication_date", "date", "year"]
+slice_fields = ["period", "year"]
+role_fields = ["role"]
+accepted_roles = ["core", "support"]
+
+[taxonomy]
+induction_enabled = true
+expansion_enabled = true
+max_induced_nodes_per_dimension = 4
+min_cluster_documents = 1
+expansion_threshold = 0.25
+
+[taxonomy.dimensions.mechanisms]
+display_name = "Mechanisms"
+definition = "Explanatory mechanisms and social processes."
+
+[taxonomy.dimensions.interventions]
+display_name = "Interventions"
+definition = "Policy tools and intervention designs."
+
+[graph]
+entity_dimensions = ["mechanisms", "interventions"]
+entity_types = ["intervention", "policy_instrument", "explanatory_mechanism"]
+method_cue_terms = ["intervention", "policy", "mechanism", "governance", "audit", "moderation"]
+min_entity_mentions = 1
+
+[graph.entity_patterns]
+intervention = ["inoculation intervention", "platform labeling"]
+policy_instrument = ["transparency mandate", "algorithmic audit"]
+
+[llm]
+provider = "deterministic"
+
+[output]
+root = "../examples/induction_only_output"
+

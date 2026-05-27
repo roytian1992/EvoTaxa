@@ -104,3 +104,31 @@ The config controls:
 
 This is what makes the same code usable for scientific research and social science.
 
+## LLM Configuration
+
+EvoTaxa can run without an LLM. In that mode it uses deterministic fallback logic and still writes all artifacts.
+
+For development with a local OpenAI-compatible server:
+
+```toml
+[llm]
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key = "token-abc123"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+```
+
+For shared configs, use:
+
+```toml
+[llm]
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key_env = "EVOTAXA_LLM_API_KEY"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = []
+```
+
+`enabled_tasks = []` means the config is LLM-ready but will not call the model by default.
+Use `enabled_tasks = ["*"]` only when every LLM-backed task may call the configured server.

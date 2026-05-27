@@ -1,0 +1,52 @@
+[project]
+name = "EvoTaxa Local GLM Development"
+domain_id = "dev"
+run_id = "local_glm_dev"
+
+[corpus]
+path = "../tests/fixtures/social/corpus.jsonl"
+source_type = "social_document"
+id_fields = ["doc_id", "paper_id", "id"]
+title_fields = ["title"]
+text_fields = ["abstract", "summary", "body_text", "text"]
+date_fields = ["publication_date", "published", "date", "year"]
+slice_fields = ["period", "chronology_slice", "year"]
+role_fields = ["role", "benchmark_role"]
+accepted_roles = ["core", "support"]
+cutoff_date = "2026-03-31"
+
+[taxonomy]
+nodes_path = "../tests/fixtures/social/taxonomy_nodes.json"
+assignments_path = "../tests/fixtures/social/assignments.jsonl"
+expansion_enabled = true
+expansion_threshold = 0.35
+min_cluster_documents = 1
+
+[taxonomy.dimensions.mechanisms]
+display_name = "Mechanisms"
+definition = "Explanatory social, behavioral, institutional, or communication mechanisms."
+
+[taxonomy.dimensions.interventions]
+display_name = "Interventions"
+definition = "Policy instruments, platform interventions, and program designs."
+
+[graph]
+entity_dimensions = ["mechanisms", "interventions"]
+entity_types = ["intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame"]
+method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame", "governance", "audit", "moderation"]
+min_entity_mentions = 1
+
+[graph.entity_patterns]
+intervention = ["inoculation intervention", "community moderation", "platform labeling"]
+policy_instrument = ["transparency mandate", "algorithmic audit"]
+
+[llm]
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key = "token-abc123"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+
+[output]
+root = "../examples/local_glm_output"
+

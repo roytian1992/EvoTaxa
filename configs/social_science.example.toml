@@ -19,6 +19,11 @@ missing_date_policy = "keep"
 [taxonomy]
 nodes_path = "../tests/fixtures/social/taxonomy_nodes.json"
 assignments_path = "../tests/fixtures/social/assignments.jsonl"
+induction_enabled = false
+expansion_enabled = true
+max_induced_nodes_per_dimension = 6
+min_cluster_documents = 1
+expansion_threshold = 0.35
 node_id_fields = ["node_id", "id"]
 node_label_fields = ["canonical_label", "label", "theme"]
 node_dimension_fields = ["dimension", "dimension_id"]
@@ -79,6 +84,13 @@ replaces = ["replaces", "shifts from", "instead of"]
 uses_component = ["uses", "borrows", "integrates"]
 compares = ["compares", "relative to"]
 
+[llm]
+# You can switch this to api_key = "token-abc123" for local private experiments.
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key_env = "EVOTAXA_LLM_API_KEY"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = []
+
 [output]
 root = "../examples/social_smoke_output"
-

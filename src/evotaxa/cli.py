@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from evotaxa.config import load_config
-from evotaxa.pipeline import run_lite
+from evotaxa.pipeline import run_full, run_lite
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,6 +18,10 @@ def main(argv: list[str] | None = None) -> int:
     run_parser = subparsers.add_parser("run-lite", help="Run deterministic taxonomy + MEG-lite pipeline.")
     run_parser.add_argument("--config", required=True, type=Path)
     run_parser.add_argument("--print-manifest", action="store_true")
+
+    full_parser = subparsers.add_parser("run-full", help="Run taxonomy induction, expansion, graph feedback, and scoring pipeline.")
+    full_parser.add_argument("--config", required=True, type=Path)
+    full_parser.add_argument("--print-manifest", action="store_true")
 
     args = parser.parse_args(argv)
     if args.command == "validate-config":
@@ -45,9 +49,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote EvoTaxa artifacts to {manifest['output_root']}")
         return 0
 
+    if args.command == "run-full":
+        manifest = run_full(args.config)
+        if args.print_manifest:
+            print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        else:
+            print(f"Wrote EvoTaxa full artifacts to {manifest['output_root']}")
+        return 0
+
     raise ValueError(f"Unknown command: {args.command}")
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

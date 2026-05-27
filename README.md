@@ -4,6 +4,8 @@ EvoTaxa is a config-driven framework for taxonomy-guided evolution modeling.
 
 The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, searches local lineage chains, and emits forecast/social-analysis hooks.
 
+`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging, taxonomy-graph feedback, and forecast-hook scoring.
+
 ## Why Config-Driven
 
 EvoTaxa is not tied to ForeSci field names. A scientific paper corpus and a social-science corpus can use different fields as long as the config maps them into the minimal internal contract.
@@ -34,6 +36,28 @@ python -m evotaxa.cli run-lite \
   --print-manifest
 ```
 
+Full pipeline:
+
+```bash
+python -m evotaxa.cli run-full \
+  --config configs/social_science.example.toml \
+  --print-manifest
+```
+
+Local OpenAI-compatible GLM development:
+
+```toml
+[llm]
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key = "token-abc123"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = ["taxonomy_candidate_judge", "edge_evidence_judge"]
+```
+
+For committed configs, prefer `api_key_env` instead of a literal token.
+Set `enabled_tasks = []` to disable model calls by default, or `enabled_tasks = ["*"]` to allow every LLM-backed task.
+
 ## Output Layout
 
 Each run writes:
@@ -46,6 +70,9 @@ Each run writes:
   taxonomy/
     taxonomy_nodes.enriched.json
     taxonomy_events.jsonl
+    taxonomy_induction_audit.jsonl
+    expansion_trigger_scores.jsonl
+    expansion_candidates.jsonl
     node_quality_scores.jsonl
     taxonomy_judge_report.json
     document_assignments.normalized.jsonl
@@ -62,7 +89,11 @@ Each run writes:
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
+    hook_score_report.json
+  feedback/
+    taxonomy_graph_feedback.jsonl
   audit/
+    llm_judge_records.jsonl
     unverified_edges.jsonl
     low_confidence_nodes.jsonl
   manifest.json
@@ -77,8 +108,9 @@ Each run writes:
 - `[graph]`: entity types, strong edge types, cue terms, and extraction limits.
 - `[graph.entity_patterns]`: optional seed entities by entity type.
 - `[graph.edge_cues]`: phrase cues for typed evolution edges.
+- `[llm]`: optional OpenAI-compatible model configuration for candidate and edge judging.
 - `[output]`: output root.
 
 ## Current Scope
 
-`run-lite` is intentionally lightweight. It gives us a stable artifact contract and a working local graph pipeline before adding LLM-based node enrichment, LLM pairwise edge judging, and stronger temporal search.
+`run-lite` is intentionally lightweight. `run-full` exposes the complete algorithmic skeleton, but high-quality production results still depend on better LLM prompts, stronger entity linking, larger corpora, and human audit.

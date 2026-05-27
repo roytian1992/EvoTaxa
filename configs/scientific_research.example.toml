@@ -20,6 +20,11 @@ missing_date_policy = "drop"
 nodes_path = "../tests/fixtures/science/taxonomy_nodes.json"
 previous_nodes_path = "../tests/fixtures/science/taxonomy_nodes.previous.json"
 assignments_path = "../tests/fixtures/science/assignments.jsonl"
+induction_enabled = false
+expansion_enabled = true
+max_induced_nodes_per_dimension = 6
+min_cluster_documents = 1
+expansion_threshold = 0.35
 node_id_fields = ["node_id", "id"]
 node_label_fields = ["canonical_label", "label", "display_name"]
 node_dimension_fields = ["dimension", "dimension_id"]
@@ -51,6 +56,13 @@ improves = ["improves", "outperforms", "reduces"]
 adapts = ["adapts", "transfers"]
 replaces = ["replaces", "instead of"]
 
+[llm]
+# Development local model config. Prefer api_key_env for committed configs.
+provider = "openai_compat"
+model_name = "GLM-4.6-FP8"
+api_key_env = "EVOTAXA_LLM_API_KEY"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = []
+
 [output]
 root = "../examples/science_smoke_output"
-
