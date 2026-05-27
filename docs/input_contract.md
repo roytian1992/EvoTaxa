@@ -99,10 +99,23 @@ The config controls:
 - taxonomy dimensions,
 - entity types,
 - entity seed patterns,
+- entity alias maps,
 - edge cue phrases,
 - output location.
 
 This is what makes the same code usable for scientific research and social science.
+
+## Entity Aliases
+
+Use `[graph.entity_aliases]` to keep evolution graph entities from fragmenting across spelling variants, abbreviations, or local terminology.
+
+```toml
+[graph.entity_aliases]
+"platform labeling" = ["content labeling", "labeling intervention", "platform labels"]
+"algorithmic audit" = ["algorithm audit", "algorithmic auditing"]
+```
+
+EvoTaxa writes both `graph/method_aliases.jsonl` and `graph/entity_linking_report.jsonl` so merges are auditable.
 
 ## LLM Configuration
 

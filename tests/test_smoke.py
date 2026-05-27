@@ -22,9 +22,10 @@ def test_scientific_config_runs() -> None:
 def test_social_config_runs() -> None:
     config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
     manifest = run_lite(config)
-    assert manifest["counts"]["documents"] == 3
+    assert manifest["counts"]["documents"] == 4
     assert manifest["counts"]["taxonomy_nodes"] == 4
     assert manifest["counts"]["entities"] >= 3
+    assert manifest["counts"]["entity_link_records"] >= manifest["counts"]["entities"]
     assert (Path(manifest["output_root"]) / "hooks" / "social_analysis_hooks.jsonl").exists()
 
 
@@ -38,6 +39,8 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "taxonomy" / "expansion_trigger_scores.jsonl").exists()
     assert (output_root / "taxonomy" / "taxonomy_nodes.expanded.json").exists()
     assert (output_root / "taxonomy" / "expansion_application_report.jsonl").exists()
+    assert (output_root / "graph" / "method_aliases.jsonl").exists()
+    assert (output_root / "graph" / "entity_linking_report.jsonl").exists()
     assert (output_root / "feedback" / "taxonomy_graph_feedback.jsonl").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
 

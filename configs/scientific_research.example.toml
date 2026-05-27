@@ -50,6 +50,10 @@ max_entities_per_document = 10
 method = ["ReAct", "Toolformer", "GraphRAG", "Memory-Augmented Agent"]
 evaluation_protocol = ["AgentBench", "ToolEval"]
 
+[graph.entity_aliases]
+"Memory-Augmented Agent" = ["Memory Augmented Agent", "memory agents"]
+"ToolEval" = ["Tool Eval", "tool-use evaluation"]
+
 [graph.edge_cues]
 extends = ["extends", "builds on", "augments"]
 improves = ["improves", "outperforms", "reduces"]

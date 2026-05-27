@@ -80,6 +80,8 @@ Each run writes:
     document_assignments.normalized.jsonl
   graph/
     method_registry.jsonl
+    method_aliases.jsonl
+    entity_linking_report.jsonl
     paper_method_mentions.jsonl
     method_edges.paper_level.jsonl
     method_edges.aggregated.jsonl
@@ -110,6 +112,7 @@ Each run writes:
 - `[taxonomy.dimensions.*]`: domain-specific taxonomy dimensions.
 - `[graph]`: entity types, strong edge types, cue terms, and extraction limits.
 - `[graph.entity_patterns]`: optional seed entities by entity type.
+- `[graph.entity_aliases]`: canonical entity names mapped to aliases for entity linking.
 - `[graph.edge_cues]`: phrase cues for typed evolution edges.
 - `[llm]`: optional OpenAI-compatible model configuration for candidate and edge judging.
 - `[output]`: output root.

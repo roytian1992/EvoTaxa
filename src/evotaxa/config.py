@@ -70,6 +70,7 @@ class GraphConfig:
     entity_types: list[str] = field(default_factory=lambda: ["method", "mechanism", "intervention", "evaluation_protocol"])
     strong_edge_types: list[str] = field(default_factory=lambda: ["extends", "improves", "replaces", "adapts"])
     entity_patterns: dict[str, list[str]] = field(default_factory=dict)
+    entity_aliases: dict[str, list[str]] = field(default_factory=dict)
     edge_cues: dict[str, list[str]] = field(default_factory=lambda: dict(DEFAULT_EDGE_CUES))
     method_cue_terms: list[str] = field(default_factory=lambda: [
         "agent",
@@ -91,6 +92,7 @@ class GraphConfig:
     min_entity_mentions: int = 1
     max_entities_per_document: int = 12
     max_edge_candidates_per_entity: int = 24
+    alias_similarity_threshold: float = 0.86
 
 
 @dataclass
@@ -248,11 +250,16 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
             str(key): as_str_list(value)
             for key, value in (graph_raw.get("entity_patterns") or {}).items()
         },
+        entity_aliases={
+            str(key): as_str_list(value)
+            for key, value in (graph_raw.get("entity_aliases") or {}).items()
+        },
         edge_cues=_merge_edge_cues(graph_raw),
         method_cue_terms=_list(graph_raw, "method_cue_terms", GraphConfig().method_cue_terms),
         min_entity_mentions=int(graph_raw.get("min_entity_mentions") or 1),
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
+        alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
     )
 
     return EvoTaxaConfig(

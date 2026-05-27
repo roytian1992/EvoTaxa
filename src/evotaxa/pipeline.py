@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from evotaxa.config import EvoTaxaConfig, load_config
+from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
 from evotaxa.feedback import build_taxonomy_graph_feedback, synthesize_feedback_events
 from evotaxa.graph import aggregate_edges, build_edges, entity_frequency_summary, extract_entities
 from evotaxa.hooks import build_forecast_hooks, build_social_analysis_hooks
@@ -66,6 +67,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     node_quality = judge_taxonomy_quality(docs, nodes)
 
     entities, mentions = extract_entities(docs, assignments, config.graph)
+    entities, mentions, entity_link_rows = canonicalize_entities(entities, mentions, config.graph)
     expansion_signals = score_expansion_triggers(docs, nodes, assignments, entities) if full or config.taxonomy.expansion_enabled else []
     expansion_candidates = propose_expansion_candidates(docs, nodes, expansion_signals, config.taxonomy) if full or config.taxonomy.expansion_enabled else []
 
@@ -97,9 +99,11 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             enriched_nodes = enrich_taxonomy_nodes(docs, nodes)
             node_quality = judge_taxonomy_quality(docs, nodes)
             entities, mentions = extract_entities(docs, assignments, config.graph)
+            entities, mentions, entity_link_rows = canonicalize_entities(entities, mentions, config.graph)
             taxonomy_events = [*taxonomy_events, *_expansion_application_events(expansion_application_report)]
 
     edges = build_edges(docs, entities, mentions, config.graph)
+    edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
     if full and edges:
         doc_map = {doc.doc_id: doc for doc in docs}
         judged_edges = []
@@ -140,6 +144,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "taxonomy" / "expansion_application_report.jsonl", expansion_application_report)
 
     write_jsonl(output_root / "graph" / "method_registry.jsonl", (entity.to_record() for entity in entities))
+    write_jsonl(output_root / "graph" / "method_aliases.jsonl", entity_link_rows)
+    write_jsonl(output_root / "graph" / "entity_linking_report.jsonl", entity_link_rows)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
     write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in edges))
     write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", aggregated_edges)
@@ -180,6 +186,7 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "expansion_candidates": len(expansion_candidates),
             "applied_expansions": sum(1 for row in expansion_application_report if row.get("status") == "applied"),
             "entities": len(entities),
+            "entity_link_records": len(entity_link_rows),
             "mentions": len(mentions),
             "paper_level_edges": len(edges),
             "aggregated_edges": len(aggregated_edges),
@@ -199,6 +206,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "expansion_application_report": "taxonomy/expansion_application_report.jsonl",
             "expanded_taxonomy_nodes": "taxonomy/taxonomy_nodes.expanded.json",
             "method_registry": "graph/method_registry.jsonl",
+            "method_aliases": "graph/method_aliases.jsonl",
+            "entity_linking_report": "graph/entity_linking_report.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",

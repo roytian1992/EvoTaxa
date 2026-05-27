@@ -71,10 +71,14 @@ min_entity_mentions = 1
 max_entities_per_document = 12
 
 [graph.entity_patterns]
-intervention = ["inoculation intervention", "community moderation", "platform labeling"]
+intervention = ["inoculation intervention", "community moderation", "platform labeling", "content labeling"]
 policy_instrument = ["transparency mandate", "algorithmic audit"]
 measurement_strategy = ["network audit", "survey experiment"]
 public_frame = ["platform governance frame", "individual responsibility frame"]
+
+[graph.entity_aliases]
+"platform labeling" = ["content labeling", "labeling intervention", "platform labels"]
+"algorithmic audit" = ["algorithm audit", "algorithmic auditing"]
 
 [graph.edge_cues]
 extends = ["extends", "adds", "combines"]
