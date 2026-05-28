@@ -1,10 +1,49 @@
 # EvoTaxa
 
-EvoTaxa is a config-driven framework for taxonomy-guided evolution modeling.
+EvoTaxa is a config-driven framework for taxonomy-guided, schema-adaptive, evidence-grounded evolution modeling.
 
-The first implementation in this repository is `run-lite`: a deterministic Phase 1 + MEG-lite pipeline that normalizes arbitrary domain data, enriches taxonomy nodes, detects simple taxonomy events, extracts method/mechanism entities, builds typed evolution edges, validates evidence quotes, separates trusted/candidate edges, searches local lineage chains, and emits forecast/social-analysis hooks.
+The core idea is to model a domain as an evolving state, not just as a flat set of topics or co-mentioned entities. EvoTaxa jointly maintains:
 
-`run-full` adds the research-plan modules: initial taxonomy induction when no taxonomy is provided, expansion trigger scoring, expansion candidate generation, optional LLM judging with cache/retry/schema validation, accepted-candidate application into an expanded taxonomy snapshot, quote-grounded edge evidence auditing, taxonomy-graph co-evolution revisions, and forecast-hook scoring.
+- a taxonomy that defines domain regions and their boundaries,
+- a schema that defines valid entity, relation, and evidence contracts,
+- an evolution graph whose edges are quote-grounded and schema-constrained,
+- a state model that records how taxonomy, schema, and relations change,
+- a trajectory model that reconstructs plausible evolution paths.
+
+`run-lite` is a deterministic version of this pipeline. It normalizes arbitrary domain data, enriches taxonomy nodes, extracts entities, builds typed evolution edges, audits quote evidence, separates trusted/candidate/unverified edges, infers local trajectories, and emits forecast or social-analysis hooks.
+
+`run-full` adds the research modules: taxonomy induction when no taxonomy is provided, taxonomy expansion, optional LLM judging with cache/retry/schema validation, batched schema-guided relation extraction, adaptive schema revision, negative-evidence feedback, taxonomy-graph co-evolution, explicit state-transition artifacts, trajectory scoring, and run-level quality reporting.
+
+## Algorithm Flow
+
+EvoTaxa runs as a closed-loop evolution modeling algorithm:
+
+```text
+corpus
+  -> normalized documents and cutoff-aware slices
+  -> taxonomy induction / enrichment / expansion
+  -> entity extraction, linking, and quality filtering
+  -> entity / relation / evidence schema resolution
+  -> schema-guided relation extraction
+  -> quote-grounded evidence audit
+  -> edge scoring and trusted/candidate/unverified stratification
+  -> taxonomy-graph co-evolution
+  -> adaptive schema revision with negative evidence
+  -> evolution state snapshot and state transitions
+  -> trajectory inference and trajectory evaluation
+  -> hooks, reports, ablations, and quality diagnostics
+```
+
+The important feedback loops are:
+
+- **Taxonomy to graph**: taxonomy nodes constrain local entity pools, candidate relation pairs, and trajectory context.
+- **Graph to taxonomy**: trusted edges and branch patterns trigger node split, cross-link, and state-annotation revisions.
+- **Schema to graph**: entity, relation, and evidence schemas constrain extraction and judging.
+- **Graph to schema**: failed quotes, weak edges, filtered entities, and rejected relation pairs become schema revision candidates.
+- **Negative evidence to schema**: rejected relation pairs are persisted as negative priors and counterexamples, so weak co-mentions do not silently become evolution edges.
+- **Edges to trajectories**: trusted edges are composed into evolution trajectories using temporal coherence, quote grounding, schema fit, and taxonomy locality.
+
+This makes EvoTaxa suitable for AI research evolution modeling and for social-science domains such as policy, governance, misinformation, polarization, education, or platform labor.
 
 ## Why Config-Driven
 
