@@ -400,12 +400,21 @@ diffuses_to, institutionalizes, reframes, operationalizes, mediates, moderates, 
 2. 采样 documents、taxonomy nodes、entity mentions 和 candidate pairs。
 3. 如果 `relation_schema_mode = inferred`，先推断候选关系类型、定义和证据要求。
 4. 对候选 schema 做规范化：不能有重复 label，必须有清晰 directionality，必须定义 source/target role，必须声明 evidence slots。
-5. 把 schema 注入 relation extraction 和 edge-evidence judging prompt。
-6. 审计输出：trusted edges、candidate edges、rejected edges、relation confusion、unverified evidence。
-7. 如果是 adaptive 模式，提出 schema revision：新增关系、合并关系、拆分含混关系、重命名关系、收紧证据要求。
-8. 只有达到支持阈值的 revision 才能 promote，并写成新的 schema version。
+5. 把 schema 注入批量 relation extraction 和 edge-evidence judging prompt。
+6. 审计输出：trusted edges、candidate edges、被拒绝的 relation pairs、relation confusion、unverified evidence。
+7. 给每条边打分：relation confidence、quote grounding、temporal order、taxonomy locality、schema fit、evidence-slot completeness。
+8. 如果是 adaptive 模式，提出 schema revision：新增关系、合并关系、拆分含混关系、重命名关系、收紧证据要求。
+9. 对 schema revision candidate 运行 schema revision judge。judge 可以 promote、reject，或者标记为 needs human review。
+10. 只有达到支持阈值并通过 judge 决策的 revision 才能 promote，并写成新的 schema version。
 
 这样我们会同时拥有两种实验设置：固定 schema 的图用于公平比较，自适应 schema 的图用于跨领域迁移。
+
+relation extraction 应该支持两种运行模式：
+
+- `fixed_schema`：模型拿到封闭 relation schema，只能在这个 schema 下接受或拒绝 candidate pair。
+- `adaptive_schema`：模型仍然基于当前 schema 抽取，但被拒绝的 pair、缺失的证据槽位、重复出现的 schema mismatch 会反过来成为 schema revision 的候选信号。
+
+被拒绝的 relation pair 不是垃圾数据，而是 negative evidence。它们需要写出明确原因，例如 `weak_co_mention`、`comparison_only`、`temporal_violation`、`no_mechanism_evidence`、`schema_mismatch`、`unsupported_by_quotes`。这点在 social science 里尤其重要，因为共现不等于存在因果、制度或机制层面的关系。
 
 #### Entity and Evidence Schema Evolution
 
@@ -587,12 +596,26 @@ data/evotaxa/<run_id>/
     entity_schema.inferred.json
     entity_schema.revisions.jsonl
     entity_schema.final.json
+    evidence_schema.fixed.json
+    evidence_schema.inferred.json
+    evidence_schema.revisions.jsonl
     evidence_schema.final.json
+    schema_revision_candidates.jsonl
+    schema_reports.jsonl
   graph/
     method_registry.jsonl
     method_aliases.jsonl
+    entity_linking_report.jsonl
+    entity_quality_report.jsonl
+    llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
+    relation_extraction_report.jsonl
+    relation_rejections.jsonl
     method_edges.paper_level.jsonl
+    method_edges.trusted.jsonl
+    method_edges.candidate.jsonl
+    method_edges.unverified.jsonl
+    edge_scores.jsonl
     method_edges.aggregated.jsonl
     method_evidence_records.jsonl
   search/
@@ -601,7 +624,15 @@ data/evotaxa/<run_id>/
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
+    hook_score_report.json
+  reports/
+    case_study_report.md
+  feedback/
+    taxonomy_graph_feedback.jsonl
+  evaluation/
+    quality_report.json
   audit/
+    llm_judge_records.jsonl
     unverified_edges.jsonl
     low_confidence_nodes.jsonl
     taxonomy_judge_report.json
@@ -769,6 +800,8 @@ llm_agent
 - 加入 relation schema 的 fixed、inferred、adaptive 三种模式。
 - 加入可配置的 entity schema 和 evidence schema，支持跨领域抽取。
 - 保存 schema 版本、diff 和 promotion decision。
+- 加入批量 LLM relation extraction，要求 quote-grounded evidence，并保存 rejected-pair audit。
+- 加入 edge scoring，显式评估 temporal causality、schema fit、quote grounding 和 taxonomy locality。
 
 Deliverables：
 
@@ -776,10 +809,16 @@ Deliverables：
 schema/relation_schema.final.json
 schema/entity_schema.final.json
 schema/evidence_schema.final.json
+schema/schema_revision_candidates.jsonl
 schema/relation_schema.revisions.jsonl
+schema/entity_schema.revisions.jsonl
+schema/evidence_schema.revisions.jsonl
 method_registry.jsonl
 paper_method_mentions.jsonl
+relation_extraction_report.jsonl
+relation_rejections.jsonl
 method_edges.paper_level.jsonl
+edge_scores.jsonl
 method_evidence_records.jsonl
 ```
 
@@ -856,6 +895,8 @@ Deliverables：
 social_taxonomy_nodes.enriched.json
 social_mechanism_edges.jsonl
 social_analysis_hooks.jsonl
+graph/relation_rejections.jsonl
+graph/edge_scores.jsonl
 case_study_report.md
 ```
 

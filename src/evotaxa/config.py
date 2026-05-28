@@ -118,6 +118,7 @@ class GraphConfig:
     max_edge_candidates_per_entity: int = 24
     llm_entity_extraction_limit: int = 12
     llm_relation_extraction_limit: int = 100
+    llm_relation_batch_size: int = 1
     llm_edge_judge_limit: int = 100
     alias_similarity_threshold: float = 0.86
     min_entity_quality: float = 0.42
@@ -360,6 +361,7 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
         llm_entity_extraction_limit=int(graph_raw.get("llm_entity_extraction_limit") or 12),
         llm_relation_extraction_limit=int(graph_raw.get("llm_relation_extraction_limit", 100)),
+        llm_relation_batch_size=int(graph_raw.get("llm_relation_batch_size", 1)),
         llm_edge_judge_limit=int(graph_raw.get("llm_edge_judge_limit", 100)),
         alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
         min_entity_quality=float(graph_raw.get("min_entity_quality") or 0.42),

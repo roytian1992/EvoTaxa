@@ -50,6 +50,7 @@ method_cue_terms = ["intervention", "policy", "mechanism", "measurement", "frame
 min_entity_mentions = 1
 llm_entity_extraction_limit = 12
 llm_relation_extraction_limit = 100
+llm_relation_batch_size = 4
 llm_edge_judge_limit = 100
 trusted_edge_confidence_threshold = 0.65
 candidate_edge_confidence_threshold = 0.35
@@ -64,7 +65,7 @@ provider = "openai_compat"
 model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "relation_extraction", "edge_evidence_judge", "relation_schema_inference", "entity_evidence_schema_inference"]
+enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "relation_extraction_batch", "relation_extraction", "edge_evidence_judge", "schema_revision_judge", "relation_schema_inference", "entity_evidence_schema_inference"]
 
 [output]
 root = "../examples/local_llm_output"

@@ -223,6 +223,7 @@ def adapt_schema_after_graph(
     edge_evidence_audit: list[dict[str, Any]],
     entity_quality_report: list[dict[str, Any]],
     config: EvoTaxaConfig,
+    judgements: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[SchemaBundle, list[dict[str, Any]]]:
     adapted = SchemaBundle(
         entity_schema=deepcopy(bundle.entity_schema),
@@ -244,8 +245,9 @@ def adapt_schema_after_graph(
         entity_quality_report=entity_quality_report,
         config=config,
     )
-    revisions = promote_schema_revisions(adapted, candidates, config)
-    adapted["revision_candidates"].extend(candidates)
+    judged_candidates = _apply_revision_judgements(candidates, judgements or {})
+    revisions = promote_schema_revisions(adapted, judged_candidates, config)
+    adapted["revision_candidates"].extend(judged_candidates)
     adapted.reports.extend(revisions)
     return adapted, revisions
 
@@ -278,7 +280,11 @@ def promote_schema_revisions(
     bundle: SchemaBundle,
     candidates: list[dict[str, Any]],
     config: EvoTaxaConfig,
+    judgements: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    candidates = _apply_revision_judgements(candidates, judgements or {})
+    held_by_judge = [row for row in candidates if row.get("decision") in {"rejected", "needs_human_review"}]
+    candidates = [row for row in candidates if row.get("decision") not in {"rejected", "needs_human_review"}]
     if config.schema.max_schema_revisions > 0:
         promotable = candidates[: config.schema.max_schema_revisions]
         overflow = candidates[config.schema.max_schema_revisions :]
@@ -307,10 +313,42 @@ def promote_schema_revisions(
 
     for candidate in overflow:
         revisions.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "max_schema_revisions_reached"})
+    revisions.extend(held_by_judge)
     for row in revisions:
         row.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
         row.setdefault("decision", "promoted" if row.get("status") == "applied" else row.get("decision", "rejected"))
     return revisions
+
+
+def _apply_revision_judgements(
+    candidates: list[dict[str, Any]],
+    judgements: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_id = str(candidate.get("candidate_id") or "")
+        judgement = judgements.get(candidate_id) or {}
+        decision = str(judgement.get("decision") or "promote")
+        row = dict(candidate)
+        if judgement:
+            row["judge_decision"] = decision
+            row["judge_confidence"] = judgement.get("confidence")
+            row["judge_rationale"] = judgement.get("rationale")
+            row["judge_risk"] = judgement.get("risk")
+        if decision == "reject":
+            row["status"] = "rejected"
+            row["decision"] = "rejected"
+            row["reason"] = judgement.get("rationale") or row.get("reason") or "schema_revision_judge_rejected"
+            rows.append(row)
+        elif decision == "needs_human_review":
+            row["status"] = "needs_human_review"
+            row["decision"] = "needs_human_review"
+            rows.append(row)
+        else:
+            rows.append(row)
+    promotable = [row for row in rows if row.get("decision") not in {"rejected", "needs_human_review"}]
+    held = [row for row in rows if row.get("decision") in {"rejected", "needs_human_review"}]
+    return [*promotable, *held]
 
 
 def fixed_entity_schema(

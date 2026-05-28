@@ -391,12 +391,21 @@ The evolution loop is:
 2. Sample documents, taxonomy nodes, entity mentions, and candidate pairs.
 3. Infer candidate relation types and definitions when `relation_schema_mode = inferred`.
 4. Normalize the candidate schema against hard constraints: no duplicate labels, clear directionality, allowed entity roles, required evidence slots.
-5. Use the schema inside relation extraction and edge-evidence judging prompts.
-6. Audit outputs: trusted edges, candidate edges, rejected edges, relation confusion, and unverified evidence.
-7. In adaptive mode, propose schema revisions: add relation type, merge relation types, split ambiguous relation type, rename unclear type, or tighten evidence requirements.
-8. Promote only revisions with enough support and write them as a new schema version.
+5. Use the schema inside batched relation extraction and edge-evidence judging prompts.
+6. Audit outputs: trusted edges, candidate edges, rejected relation pairs, relation confusion, and unverified evidence.
+7. Score every edge with relation confidence, quote grounding, temporal order, taxonomy locality, schema fit, and evidence-slot completeness.
+8. In adaptive mode, propose schema revisions: add relation type, merge relation types, split ambiguous relation type, rename unclear type, or tighten evidence requirements.
+9. Run a schema revision judge over proposed revisions. The judge can promote, reject, or hold a revision for human review.
+10. Promote only revisions with enough support and a compatible judge decision, then write them as a new schema version.
 
 This gives us two useful experimental settings: a stable fixed-schema graph for fair comparison, and an adaptive-schema graph for domain transfer.
+
+Relation extraction should support two execution modes:
+
+- `fixed_schema`: the model receives a closed relation schema and must accept or reject each candidate pair under that schema.
+- `adaptive_schema`: the model still extracts under a current schema, but rejected pairs, missing evidence slots, and repeated schema mismatches become candidates for schema revision.
+
+Rejected relation pairs are not discarded. They are negative evidence with explicit reasons such as `weak_co_mention`, `comparison_only`, `temporal_violation`, `no_mechanism_evidence`, `schema_mismatch`, and `unsupported_by_quotes`. This is important in social science because co-mention does not imply a causal, institutional, or mechanism-level relation.
 
 #### Entity and Evidence Schema Evolution
 
@@ -578,12 +587,26 @@ data/evotaxa/<run_id>/
     entity_schema.inferred.json
     entity_schema.revisions.jsonl
     entity_schema.final.json
+    evidence_schema.fixed.json
+    evidence_schema.inferred.json
+    evidence_schema.revisions.jsonl
     evidence_schema.final.json
+    schema_revision_candidates.jsonl
+    schema_reports.jsonl
   graph/
     method_registry.jsonl
     method_aliases.jsonl
+    entity_linking_report.jsonl
+    entity_quality_report.jsonl
+    llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
+    relation_extraction_report.jsonl
+    relation_rejections.jsonl
     method_edges.paper_level.jsonl
+    method_edges.trusted.jsonl
+    method_edges.candidate.jsonl
+    method_edges.unverified.jsonl
+    edge_scores.jsonl
     method_edges.aggregated.jsonl
     method_evidence_records.jsonl
   search/
@@ -592,7 +615,15 @@ data/evotaxa/<run_id>/
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
+    hook_score_report.json
+  reports/
+    case_study_report.md
+  feedback/
+    taxonomy_graph_feedback.jsonl
+  evaluation/
+    quality_report.json
   audit/
+    llm_judge_records.jsonl
     unverified_edges.jsonl
     low_confidence_nodes.jsonl
     taxonomy_judge_report.json
@@ -758,6 +789,8 @@ Scope:
 - Add fixed, inferred, and adaptive modes for relation schema.
 - Add configurable entity and evidence schema for cross-domain extraction.
 - Persist schema versions, diffs, and promotion decisions.
+- Add batched LLM relation extraction with quote-grounded evidence and rejected-pair audit.
+- Add edge scoring for temporal causality, schema fit, quote grounding, and taxonomy locality.
 
 Deliverables:
 
@@ -765,10 +798,16 @@ Deliverables:
 schema/relation_schema.final.json
 schema/entity_schema.final.json
 schema/evidence_schema.final.json
+schema/schema_revision_candidates.jsonl
 schema/relation_schema.revisions.jsonl
+schema/entity_schema.revisions.jsonl
+schema/evidence_schema.revisions.jsonl
 method_registry.jsonl
 paper_method_mentions.jsonl
+relation_extraction_report.jsonl
+relation_rejections.jsonl
 method_edges.paper_level.jsonl
+edge_scores.jsonl
 method_evidence_records.jsonl
 ```
 
@@ -845,6 +884,8 @@ Deliverables:
 social_taxonomy_nodes.enriched.json
 social_mechanism_edges.jsonl
 social_analysis_hooks.jsonl
+graph/relation_rejections.jsonl
+graph/edge_scores.jsonl
 case_study_report.md
 ```
 

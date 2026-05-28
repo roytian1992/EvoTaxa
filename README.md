@@ -68,18 +68,37 @@ python -m evotaxa.cli run-ablation \
 Local OpenAI-compatible LLM development:
 
 ```toml
+[graph]
+llm_relation_batch_size = 4
+
 [llm]
 provider = "openai_compat"
 model_name = "your-model-name"
 api_key = "token-abc123"
 base_url = "http://localhost:8001/v1"
-enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "relation_extraction", "edge_evidence_judge"]
+enabled_tasks = [
+  "entity_extraction",
+  "taxonomy_candidate_judge",
+  "relation_extraction_batch",
+  "edge_evidence_judge",
+  "schema_revision_judge",
+  "relation_schema_inference",
+  "entity_evidence_schema_inference",
+]
 ```
 
 For committed configs, prefer `api_key_env` instead of a literal token.
 Set `enabled_tasks = []` to disable model calls by default, or `enabled_tasks = ["*"]` to allow every LLM-backed task.
 
-For adaptive schema work, also enable `relation_schema_inference` and `entity_evidence_schema_inference`.
+For adaptive schema work, also enable `relation_schema_inference`, `entity_evidence_schema_inference`, and `schema_revision_judge`.
+
+Adaptive social-science case study:
+
+```bash
+python -m evotaxa.cli run-full \
+  --config configs/social_misinformation_governance.adaptive.toml \
+  --print-manifest
+```
 
 ## Output Layout
 
@@ -127,10 +146,12 @@ Each run writes:
     llm_entity_mentions.jsonl
     paper_method_mentions.jsonl
     relation_extraction_report.jsonl
+    relation_rejections.jsonl
     method_edges.paper_level.jsonl
     method_edges.trusted.jsonl
     method_edges.candidate.jsonl
     method_edges.unverified.jsonl
+    edge_scores.jsonl
     method_edges.aggregated.jsonl
     method_edges.all_aggregated.jsonl
     edge_evidence_audit.jsonl
@@ -147,6 +168,8 @@ Each run writes:
     taxonomy_graph_feedback.jsonl
   evaluation/
     quality_report.json
+  reports/
+    case_study_report.md
   audit/
     llm_judge_records.jsonl
     llm_cache.jsonl
@@ -162,7 +185,7 @@ Each run writes:
 - `[taxonomy]`: taxonomy node/assignment paths and field mappings.
 - `[taxonomy.dimensions.*]`: domain-specific taxonomy dimensions.
 - `[schema]`: fixed, inferred, or adaptive schema modes for entity, relation, and evidence schemas.
-- `[graph]`: entity types, strong edge types, cue terms, and extraction limits.
+- `[graph]`: entity types, strong edge types, cue terms, extraction limits, and relation batch size.
 - `[graph.entity_patterns]`: optional seed entities by entity type.
 - `[graph.entity_aliases]`: canonical entity names mapped to aliases for entity linking.
 - `[graph.entity_denylist]` / `[graph.entity_allowlist]`: manual entity quality overrides.
@@ -180,7 +203,9 @@ EvoTaxa treats schema as a versioned artifact. `[schema]` supports:
 
 The relation schema is injected into edge construction and LLM edge judging. The entity schema constrains quote-grounded entity extraction. The evidence schema defines which quote-backed slots are audited. Each run writes fixed, inferred, final, candidate, and promoted revision artifacts under `schema/`.
 
-In `run-full`, enabling `relation_extraction` lets the model create schema-guided relation edges from candidate entity pairs before the evidence judge audits them. Cue-based edges remain as a deterministic fallback and prior.
+In `run-full`, enabling `relation_extraction_batch` lets the model create schema-guided relation edges from candidate entity pairs before the evidence judge audits them. Cue-based edges remain as a deterministic fallback and prior. Rejected relation pairs are also written as negative evidence so the run can explain what the model refused to connect.
+
+When schema modes are `adaptive`, EvoTaxa can evolve the relation schema, entity schema, and evidence schema. A model-backed `schema_revision_judge` can decide whether each proposed schema revision should be promoted, rejected, or held for human review.
 
 ## Edge Evidence
 
@@ -190,6 +215,8 @@ Every edge is audited after construction. EvoTaxa checks quotes in `bottleneck`,
 - `graph/method_edges.candidate.jsonl`: plausible but weaker edges, including non-strong edge types and edges below the trusted threshold.
 - `graph/method_edges.unverified.jsonl`: edges below the candidate threshold or lacking usable evidence.
 - `graph/edge_evidence_audit.jsonl`: field-level quote checks and the reason for each edge status.
+- `graph/edge_scores.jsonl`: relation confidence, quote grounding, temporal order, taxonomy locality, schema fit, evidence-slot completeness, and final edge score.
+- `graph/relation_rejections.jsonl`: relation candidates rejected because they were weak co-mentions, comparison-only links, temporal violations, schema mismatches, or unsupported by quotes.
 
 Search, hooks, and feedback use trusted edges when available; if a run has no trusted edges, they fall back to candidate edges so small exploratory corpora still produce inspectable outputs.
 

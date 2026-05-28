@@ -1,0 +1,109 @@
+[project]
+name = "EvoTaxa Misinformation Governance Adaptive Case Study"
+domain_id = "misinformation_governance"
+run_id = "misinformation_governance_adaptive"
+
+[corpus]
+path = "../tests/fixtures/social/corpus.jsonl"
+source_type = "social_document"
+id_fields = ["doc_id", "study_id", "id"]
+title_fields = ["title"]
+text_fields = ["abstract", "summary", "body_text", "text"]
+date_fields = ["publication_date", "date", "year"]
+slice_fields = ["period", "year"]
+role_fields = ["role", "inclusion_decision"]
+accepted_roles = ["core", "support"]
+cutoff_date = "2026-03-31"
+missing_date_policy = "keep"
+
+[taxonomy]
+nodes_path = "../tests/fixtures/social/taxonomy_nodes.json"
+assignments_path = "../tests/fixtures/social/assignments.jsonl"
+induction_enabled = false
+expansion_enabled = true
+max_induced_nodes_per_dimension = 6
+min_cluster_documents = 1
+expansion_threshold = 0.35
+coevolution_enabled = true
+max_coevolution_iterations = 1
+max_revision_candidates = 30
+max_applied_revisions = 10
+revision_acceptance_threshold = 0.58
+
+[taxonomy.dimensions.actors]
+display_name = "Actors"
+definition = "Institutions, platforms, communities, and public groups."
+
+[taxonomy.dimensions.interventions]
+display_name = "Interventions"
+definition = "Policy instruments, platform interventions, and program designs."
+
+[taxonomy.dimensions.mechanisms]
+display_name = "Mechanisms"
+definition = "Social, behavioral, institutional, or communication mechanisms."
+
+[taxonomy.dimensions.measurement_strategies]
+display_name = "Measurement Strategies"
+definition = "Operationalizations, audit methods, experiments, and metrics."
+
+[taxonomy.dimensions.public_frames]
+display_name = "Public Frames"
+definition = "Narratives, discourses, and issue framings."
+
+[taxonomy.dimensions.outcomes]
+display_name = "Outcomes"
+definition = "Social, behavioral, political, economic, or institutional outcomes."
+
+[schema]
+entity_schema_mode = "adaptive"
+relation_schema_mode = "adaptive"
+evidence_schema_mode = "adaptive"
+schema_inference_sample_size = 30
+schema_revision_min_support = 2
+max_schema_revisions = 5
+
+[graph]
+entity_dimensions = ["actors", "interventions", "mechanisms", "measurement_strategies", "public_frames", "outcomes"]
+entity_types = ["actor", "institution", "intervention", "policy_instrument", "explanatory_mechanism", "measurement_strategy", "public_frame", "outcome"]
+strong_edge_types = ["extends", "improves", "replaces", "adapts"]
+method_cue_terms = ["actor", "institution", "intervention", "policy", "mechanism", "measurement", "frame", "outcome", "governance", "audit", "moderation"]
+min_entity_mentions = 1
+max_entities_per_document = 12
+min_entity_quality = 0.42
+llm_entity_extraction_limit = 12
+llm_relation_extraction_limit = 100
+llm_relation_batch_size = 4
+llm_edge_judge_limit = 100
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
+
+[graph.entity_patterns]
+intervention = ["inoculation intervention", "community moderation", "platform labeling", "content labeling"]
+policy_instrument = ["transparency mandate", "algorithmic audit"]
+measurement_strategy = ["network audit", "survey experiment"]
+public_frame = ["platform governance frame", "individual responsibility frame"]
+actor = ["platforms", "communities", "regulators"]
+outcome = ["misinformation sharing", "civic trust"]
+
+[graph.entity_aliases]
+"platform labeling" = ["content labeling", "labeling intervention", "platform labels"]
+"algorithmic audit" = ["algorithm audit", "algorithmic auditing"]
+
+[graph.edge_cues]
+extends = ["extends", "adds", "combines"]
+improves = ["improves", "increases", "reduces"]
+adapts = ["adapts", "transfers", "applies to"]
+replaces = ["replaces", "shifts from", "instead of"]
+uses_component = ["uses", "borrows", "integrates"]
+compares = ["compares", "relative to"]
+
+[llm]
+provider = "openai_compat"
+model_name = "your-model-name"
+api_key_env = "EVOTAXA_LLM_API_KEY"
+base_url = "http://localhost:8001/v1"
+enabled_tasks = []
+
+[output]
+root = "../examples/misinformation_governance_adaptive_output"

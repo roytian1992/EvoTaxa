@@ -286,6 +286,56 @@ def extract_relation_for_pair(
     return client.complete_json(task="relation_extraction", prompt=prompt, fallback=fallback)
 
 
+def extract_relations_for_pairs(
+    client: LLMClient,
+    *,
+    pairs: list[dict[str, Any]],
+    document_texts: dict[str, str],
+    relation_schema: dict[str, Any],
+    evidence_schema: dict[str, Any],
+) -> LLMRecord:
+    fallback = {
+        "relations": [
+            {
+                "pair_index": index,
+                "accept": False,
+                "edge_type": "background",
+                "confidence": 0.0,
+                "evidence": {},
+                "rationale": "Deterministic fallback: schema-guided relation extraction task was not run.",
+                "negative_rationale": "No model evidence available.",
+                "rejection_reason": "model_not_run",
+            }
+            for index, _ in enumerate(pairs)
+        ]
+    }
+    prompt_pairs = []
+    for index, pair in enumerate(pairs):
+        source_doc = str(pair.get("source_document") or "")
+        target_doc = str(pair.get("target_document") or "")
+        prompt_pairs.append(
+            {
+                "pair_index": index,
+                "pair": pair,
+                "source_text": document_texts.get(source_doc, "")[:2500],
+                "target_text": document_texts.get(target_doc, "")[:2500],
+            }
+        )
+    prompt = (
+        "Decide whether each source-target entity pair expresses a taxonomy-guided evolution relation.\n"
+        "Use the relation schema as the closed set of allowed edge types. Prefer background or accept=false for weak co-mentions.\n"
+        "For rejected pairs, provide a rejection_reason from: weak_co_mention, comparison_only, temporal_violation, no_mechanism_evidence, schema_mismatch, unsupported_by_quotes.\n"
+        "If accepted, return quote-grounded evidence for the selected relation's evidence slots. Every quote must be copied exactly from source or target text.\n"
+        f"Allowed relation schema:\n{json.dumps(relation_schema, ensure_ascii=False)}\n"
+        f"Evidence schema:\n{json.dumps(evidence_schema, ensure_ascii=False)}\n"
+        f"Pairs:\n{json.dumps(prompt_pairs, ensure_ascii=False)}\n"
+        "Return JSON: {\"relations\": [{\"pair_index\": 0, \"accept\": false, \"edge_type\": \"background\", "
+        "\"confidence\": 0.0, \"evidence\": {}, \"rationale\": \"\", \"negative_rationale\": \"\", "
+        "\"rejection_reason\": \"weak_co_mention\"}]}."
+    )
+    return client.complete_json(task="relation_extraction_batch", prompt=prompt, fallback=fallback)
+
+
 def infer_relation_schema(
     client: LLMClient,
     *,
@@ -346,6 +396,28 @@ def infer_entity_evidence_schema(
     return client.complete_json(task="entity_evidence_schema_inference", prompt=prompt, fallback=fallback)
 
 
+def judge_schema_revision(
+    client: LLMClient,
+    *,
+    candidate: dict[str, Any],
+    current_schema: dict[str, Any],
+) -> LLMRecord:
+    fallback = {
+        "decision": "promote",
+        "confidence": candidate.get("confidence", 0.0),
+        "rationale": "Deterministic fallback promotes threshold-generated schema revision.",
+        "risk": "not_model_judged",
+    }
+    prompt = (
+        "Judge this schema revision candidate for taxonomy-guided evolution modeling.\n"
+        "Assess whether it is necessary, non-duplicative, and unlikely to harm cross-run comparability.\n"
+        f"Current schema:\n{json.dumps(current_schema, ensure_ascii=False)[:5000]}\n"
+        f"Candidate:\n{json.dumps(candidate, ensure_ascii=False)}\n"
+        "Return JSON with decision, confidence, rationale, and risk. decision must be promote, reject, or needs_human_review."
+    )
+    return client.complete_json(task="schema_revision_judge", prompt=prompt, fallback=fallback)
+
+
 def extract_document_entities(
     client: LLMClient,
     *,
@@ -391,6 +463,19 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
         )
     if task == "relation_extraction":
         return "accept" in output and "edge_type" in output and "confidence" in output and "evidence" in output
+    if task == "relation_extraction_batch":
+        rows = output.get("relations")
+        if not isinstance(rows, list):
+            return False
+        return all(
+            isinstance(row, dict)
+            and "pair_index" in row
+            and "accept" in row
+            and "edge_type" in row
+            and "confidence" in row
+            and "evidence" in row
+            for row in rows
+        )
     if task == "relation_schema_inference":
         relation_types = output.get("relation_types")
         if not isinstance(relation_types, list):
@@ -404,6 +489,8 @@ def _schema_valid(task: str, output: dict[str, Any]) -> bool:
         valid_entities = all(isinstance(row, dict) and row.get("entity_type") and row.get("definition") for row in entity_types)
         valid_slots = all(isinstance(row, dict) and row.get("slot") and row.get("definition") for row in evidence_slots)
         return valid_entities and valid_slots
+    if task == "schema_revision_judge":
+        return output.get("decision") in {"promote", "reject", "needs_human_review"} and "confidence" in output
     if task == "entity_extraction":
         entities = output.get("entities")
         if not isinstance(entities, list):

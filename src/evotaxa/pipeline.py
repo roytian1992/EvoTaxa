@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from evotaxa.case_study import build_case_study_report
 from evotaxa.coevolution import apply_taxonomy_revisions, propose_taxonomy_revisions
 from evotaxa.config import EvoTaxaConfig, load_config
 from evotaxa.edge_evidence import stratify_edges_by_evidence
+from evotaxa.edge_scoring import score_edges
 from evotaxa.entity_linking import canonicalize_entities, remap_edges_to_canonical_entities
 from evotaxa.entity_quality import filter_entities_by_quality
 from evotaxa.evaluation import build_quality_report
@@ -32,8 +34,8 @@ from evotaxa.induction import (
 )
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
-from evotaxa.llm import build_llm_client, extract_document_entities, extract_relation_for_pair, judge_edge_evidence, judge_taxonomy_candidate
-from evotaxa.schema import adapt_schema_after_graph, resolve_initial_schema
+from evotaxa.llm import build_llm_client, extract_document_entities, extract_relations_for_pairs, judge_edge_evidence, judge_schema_revision, judge_taxonomy_candidate
+from evotaxa.schema import adapt_schema_after_graph, propose_schema_revision_candidates, resolve_initial_schema
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
 from evotaxa.taxonomy import build_taxonomy_events, enrich_taxonomy_nodes, judge_taxonomy_quality
@@ -149,6 +151,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
         edge_evidence_audit=graph_layer["edge_evidence_audit"],
         entity_quality_report=entity_quality_report,
         config=config,
+        judgements=_judge_schema_revision_candidates(
+            schema_bundle,
+            edge_evidence_audit=graph_layer["edge_evidence_audit"],
+            entity_quality_report=entity_quality_report,
+            config=config,
+            llm_client=llm_client,
+            llm_records=llm_records,
+        ),
     )
     feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates) if full else []
     revision_candidates: list[dict[str, Any]] = []
@@ -212,6 +222,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
                 edge_evidence_audit=graph_layer["edge_evidence_audit"],
                 entity_quality_report=entity_quality_report,
                 config=config,
+                judgements=_judge_schema_revision_candidates(
+                    schema_bundle,
+                    edge_evidence_audit=graph_layer["edge_evidence_audit"],
+                    entity_quality_report=entity_quality_report,
+                    config=config,
+                    llm_client=llm_client,
+                    llm_records=llm_records,
+                ),
             )
             schema_revisions = [*schema_revisions, *iteration_schema_revisions]
             feedback_rows = build_taxonomy_graph_feedback(nodes, entities, graph_layer["downstream_edges"], expansion_candidates)
@@ -273,12 +291,14 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "graph" / "llm_entity_mentions.jsonl", llm_entity_report)
     write_jsonl(output_root / "graph" / "paper_method_mentions.jsonl", (mention.to_record() for mention in mentions))
     write_jsonl(output_root / "graph" / "relation_extraction_report.jsonl", graph_layer["relation_extraction_report"])
+    write_jsonl(output_root / "graph" / "relation_rejections.jsonl", graph_layer["relation_rejections"])
     write_jsonl(output_root / "graph" / "method_edges.paper_level.jsonl", (edge.to_record() for edge in graph_layer["edges"]))
     write_jsonl(output_root / "graph" / "method_edges.trusted.jsonl", (edge.to_record() for edge in graph_layer["trusted_edges"]))
     write_jsonl(output_root / "graph" / "method_edges.candidate.jsonl", (edge.to_record() for edge in graph_layer["candidate_edges"]))
     write_jsonl(output_root / "graph" / "method_edges.unverified.jsonl", (edge.to_record() for edge in graph_layer["unverified_edges"]))
     write_jsonl(output_root / "graph" / "method_edges.aggregated.jsonl", graph_layer["aggregated_edges"])
     write_jsonl(output_root / "graph" / "method_edges.all_aggregated.jsonl", aggregate_edges(graph_layer["edges"]))
+    write_jsonl(output_root / "graph" / "edge_scores.jsonl", graph_layer["edge_score_rows"])
     write_jsonl(output_root / "graph" / "edge_evidence_audit.jsonl", graph_layer["edge_evidence_audit"])
     write_jsonl(output_root / "graph" / "method_evidence_records.jsonl", _evidence_rows(graph_layer["edges"]))
     write_json(output_root / "graph" / "entity_summary.json", entity_frequency_summary(entities))
@@ -332,8 +352,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "llm_entity_mentions": sum(1 for row in llm_entity_report if row.get("status") == "accepted"),
             "llm_relation_pairs": len(graph_layer["relation_extraction_report"]),
             "llm_relation_edges": sum(1 for row in graph_layer["relation_extraction_report"] if row.get("accepted")),
+            "relation_rejections": len(graph_layer["relation_rejections"]),
             "mentions": len(mentions),
             "paper_level_edges": len(graph_layer["edges"]),
+            "edge_scores": len(graph_layer["edge_score_rows"]),
             "trusted_edges": len(graph_layer["trusted_edges"]),
             "candidate_edges": len(graph_layer["candidate_edges"]),
             "unverified_edges": len(graph_layer["unverified_edges"]),
@@ -370,20 +392,33 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "entity_quality_report": "graph/entity_quality_report.jsonl",
             "llm_entity_mentions": "graph/llm_entity_mentions.jsonl",
             "relation_extraction_report": "graph/relation_extraction_report.jsonl",
+            "relation_rejections": "graph/relation_rejections.jsonl",
             "method_edges": "graph/method_edges.paper_level.jsonl",
             "trusted_method_edges": "graph/method_edges.trusted.jsonl",
             "candidate_method_edges": "graph/method_edges.candidate.jsonl",
             "unverified_method_edges": "graph/method_edges.unverified.jsonl",
+            "edge_scores": "graph/edge_scores.jsonl",
             "edge_evidence_audit": "graph/edge_evidence_audit.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
             "taxonomy_graph_feedback": "feedback/taxonomy_graph_feedback.jsonl",
             "quality_report": "evaluation/quality_report.json",
+            "case_study_report": "reports/case_study_report.md",
             "llm_judge_records": "audit/llm_judge_records.jsonl",
             "audit": "audit/",
         },
     }
     write_json(output_root / "manifest.json", manifest)
+    (output_root / "reports").mkdir(parents=True, exist_ok=True)
+    (output_root / "reports" / "case_study_report.md").write_text(
+        build_case_study_report(
+            manifest=manifest,
+            schema_revisions=schema_revisions,
+            relation_rejections=graph_layer["relation_rejections"],
+            forecast_hooks=forecast_hooks,
+        ),
+        encoding="utf-8",
+    )
     return manifest
 
 
@@ -427,6 +462,37 @@ def _extract_prepare_entities(
     return entities, mentions, entity_link_rows, entity_quality_report, llm_entity_report, raw_entity_count
 
 
+def _judge_schema_revision_candidates(
+    schema_bundle: Any,
+    *,
+    edge_evidence_audit: list[dict[str, Any]],
+    entity_quality_report: list[dict[str, Any]],
+    config: EvoTaxaConfig,
+    llm_client: Any,
+    llm_records: list[Any],
+) -> dict[str, dict[str, Any]]:
+    candidates = propose_schema_revision_candidates(
+        schema_bundle,
+        edge_evidence_audit=edge_evidence_audit,
+        entity_quality_report=entity_quality_report,
+        config=config,
+    )
+    judgements: dict[str, dict[str, Any]] = {}
+    for candidate in candidates[: max(0, config.schema.max_schema_revisions or len(candidates))]:
+        record = judge_schema_revision(
+            llm_client,
+            candidate=candidate,
+            current_schema={
+                "entity_schema": schema_bundle.entity_schema,
+                "relation_schema": schema_bundle.relation_schema,
+                "evidence_schema": schema_bundle.evidence_schema,
+            },
+        )
+        llm_records.append(record)
+        judgements[str(candidate.get("candidate_id") or "")] = record.output
+    return judgements
+
+
 def _build_graph_layer(
     docs: list[Any],
     entities: list[Any],
@@ -442,8 +508,9 @@ def _build_graph_layer(
     edges = build_edges(docs, entities, mentions, config.graph, schema_bundle.relation_schema, schema_bundle.evidence_schema)
     edges = remap_edges_to_canonical_entities(edges, entity_link_rows)
     relation_extraction_report: list[dict[str, Any]] = []
+    relation_rejections: list[dict[str, Any]] = []
     if full and config.graph.llm_relation_extraction_limit > 0:
-        extracted_edges, relation_extraction_report = _extract_schema_guided_edges(
+        extracted_edges, relation_extraction_report, relation_rejections = _extract_schema_guided_edges(
             docs,
             entities,
             config,
@@ -469,6 +536,12 @@ def _build_graph_layer(
             judged_edges.append(_apply_edge_judgement(edge, record.output, schema_bundle.evidence_schema))
         judged_ids = {edge.edge_id for edge in judged_edges}
         edges = [*judged_edges, *[edge for edge in edges if edge.edge_id not in judged_ids]]
+    edge_score_rows = score_edges(
+        edges,
+        relation_schema=schema_bundle.relation_schema,
+        evidence_schema=schema_bundle.evidence_schema,
+        config=config.graph,
+    )
     trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
     downstream_edges = _downstream_edges(trusted_edges, candidate_edges, unverified_edges)
     aggregated_edges = aggregate_edges(downstream_edges)
@@ -483,7 +556,9 @@ def _build_graph_layer(
         "candidate_edges": candidate_edges,
         "unverified_edges": unverified_edges,
         "edge_evidence_audit": edge_evidence_audit,
+        "edge_score_rows": edge_score_rows,
         "relation_extraction_report": relation_extraction_report,
+        "relation_rejections": relation_rejections,
         "downstream_edges": downstream_edges,
         "aggregated_edges": aggregated_edges,
         "chains": chains,
@@ -499,8 +574,7 @@ def _extract_schema_guided_edges(
     llm_client: Any,
     llm_records: list[Any],
     schema_bundle: Any,
-) -> tuple[list[Any], list[dict[str, Any]]]:
-    doc_map = {doc.doc_id: doc for doc in docs}
+) -> tuple[list[Any], list[dict[str, Any]], list[dict[str, Any]]]:
     pairs = build_relation_extraction_pairs(
         docs,
         entities,
@@ -509,43 +583,78 @@ def _extract_schema_guided_edges(
     )
     edges = []
     report: list[dict[str, Any]] = []
-    for index, pair in enumerate(pairs):
-        source_doc = doc_map.get(str(pair.get("source_document") or ""))
-        target_doc = doc_map.get(str(pair.get("target_document") or ""))
-        record = extract_relation_for_pair(
+    rejections: list[dict[str, Any]] = []
+    document_texts = {doc.doc_id: doc.full_text for doc in docs}
+    batch_size = max(1, int(config.graph.llm_relation_batch_size or 1))
+    for batch_start in range(0, len(pairs), batch_size):
+        batch = pairs[batch_start : batch_start + batch_size]
+        record = extract_relations_for_pairs(
             llm_client,
-            pair=pair,
-            source_text=source_doc.full_text if source_doc else "",
-            target_text=target_doc.full_text if target_doc else "",
+            pairs=batch,
+            document_texts=document_texts,
             relation_schema=schema_bundle.relation_schema,
             evidence_schema=schema_bundle.evidence_schema,
         )
         llm_records.append(record)
-        edge = edge_from_relation_extraction(
-            pair,
-            record.output,
-            relation_schema=schema_bundle.relation_schema,
-            evidence_schema=schema_bundle.evidence_schema,
-        )
-        report.append(
-            {
-                "pair_index": index,
+        rows = record.output.get("relations") if isinstance(record.output.get("relations"), list) else []
+        outputs = _relation_outputs_by_pair(rows)
+        for local_index, pair in enumerate(batch):
+            global_index = batch_start + local_index
+            output = outputs.get(local_index) or outputs.get(global_index) or _relation_rejection_fallback()
+            edge = edge_from_relation_extraction(
+                pair,
+                output,
+                relation_schema=schema_bundle.relation_schema,
+                evidence_schema=schema_bundle.evidence_schema,
+            )
+            row = {
+                "pair_index": global_index,
+                "batch_start": batch_start,
                 "source_entity": (pair.get("source_entity") or {}).get("entity_id"),
                 "target_entity": (pair.get("target_entity") or {}).get("entity_id"),
                 "source_document": pair.get("source_document"),
                 "target_document": pair.get("target_document"),
                 "accepted": edge is not None,
                 "edge_id": edge.edge_id if edge else "",
-                "edge_type": record.output.get("edge_type"),
-                "confidence": record.output.get("confidence"),
+                "edge_type": output.get("edge_type"),
+                "confidence": output.get("confidence"),
                 "used_model": record.used_model,
                 "error": record.error,
-                "rationale": record.output.get("rationale") or record.output.get("negative_rationale") or "",
+                "rationale": output.get("rationale") or output.get("negative_rationale") or "",
+                "negative_rationale": output.get("negative_rationale") or "",
+                "rejection_reason": "" if edge is not None else str(output.get("rejection_reason") or "not_accepted"),
             }
-        )
-        if edge is not None:
-            edges.append(edge)
-    return edges, report
+            report.append(row)
+            if edge is not None:
+                edges.append(edge)
+            else:
+                rejections.append(row)
+    return edges, report, rejections
+
+
+def _relation_outputs_by_pair(rows: list[Any]) -> dict[int, dict[str, Any]]:
+    outputs: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            pair_index = int(row.get("pair_index"))
+        except (TypeError, ValueError):
+            continue
+        outputs[pair_index] = row
+    return outputs
+
+
+def _relation_rejection_fallback() -> dict[str, Any]:
+    return {
+        "accept": False,
+        "edge_type": "background",
+        "confidence": 0.0,
+        "evidence": {},
+        "rationale": "",
+        "negative_rationale": "No accepted schema-guided relation was returned for this pair.",
+        "rejection_reason": "model_not_returned",
+    }
 
 
 def _merge_assignments(left: dict[str, list[str]], right: dict[str, list[str]]) -> dict[str, list[str]]:

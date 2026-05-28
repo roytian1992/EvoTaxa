@@ -5,11 +5,13 @@ from pathlib import Path
 from evotaxa.ablation import run_ablation_suite
 from evotaxa.cli import main
 from evotaxa.config import load_config
+from evotaxa.edge_scoring import edge_score_components, score_edges
 from evotaxa.edge_evidence import audit_edge_evidence, stratify_edges_by_evidence
 from evotaxa.graph import extract_entities, merge_llm_entity_mentions
-from evotaxa.llm import build_llm_client, extract_relation_for_pair, judge_edge_evidence
+from evotaxa.llm import build_llm_client, extract_relation_for_pair, extract_relations_for_pairs, judge_edge_evidence, judge_schema_revision
 from evotaxa.models import Document, EvolutionEdge
 from evotaxa.pipeline import run_full, run_lite
+from evotaxa.schema import adapt_schema_after_graph, resolve_initial_schema
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -77,13 +79,18 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "graph" / "entity_quality_report.jsonl").exists()
     assert (output_root / "graph" / "llm_entity_mentions.jsonl").exists()
     assert (output_root / "graph" / "relation_extraction_report.jsonl").exists()
+    assert (output_root / "graph" / "relation_rejections.jsonl").exists()
+    assert (output_root / "graph" / "edge_scores.jsonl").exists()
     assert (output_root / "graph" / "method_edges.trusted.jsonl").exists()
     assert (output_root / "graph" / "method_edges.candidate.jsonl").exists()
     assert (output_root / "graph" / "method_edges.unverified.jsonl").exists()
     assert (output_root / "graph" / "edge_evidence_audit.jsonl").exists()
     assert (output_root / "feedback" / "taxonomy_graph_feedback.jsonl").exists()
     assert (output_root / "evaluation" / "quality_report.json").exists()
+    assert (output_root / "reports" / "case_study_report.md").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
+    assert manifest["counts"]["edge_scores"] >= manifest["counts"]["paper_level_edges"]
+    assert manifest["artifact_layout"]["case_study_report"] == "reports/case_study_report.md"
 
 
 def test_local_llm_config_shape_is_supported() -> None:
@@ -92,8 +99,10 @@ def test_local_llm_config_shape_is_supported() -> None:
     assert config.llm.model == "your-model-name"
     assert config.llm.api_key == "token-abc123"
     assert config.llm.base_url == "http://localhost:8001/v1"
+    assert config.graph.llm_relation_batch_size == 4
     assert "entity_extraction" in config.llm.enabled_tasks
-    assert "relation_extraction" in config.llm.enabled_tasks
+    assert "relation_extraction_batch" in config.llm.enabled_tasks
+    assert "schema_revision_judge" in config.llm.enabled_tasks
 
 
 def test_schema_modes_are_configurable() -> None:
@@ -101,6 +110,22 @@ def test_schema_modes_are_configurable() -> None:
     assert config.schema.entity_schema_mode == "fixed"
     assert config.schema.relation_schema_mode == "fixed"
     assert config.schema.evidence_schema_mode == "fixed"
+
+
+def test_adaptive_social_case_study_config_runs() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_misinformation_governance.adaptive.toml")
+    assert config.schema.entity_schema_mode == "adaptive"
+    assert config.schema.relation_schema_mode == "adaptive"
+    assert config.schema.evidence_schema_mode == "adaptive"
+    manifest = run_full(config)
+    output_root = Path(manifest["output_root"])
+    assert manifest["mode"] == "full"
+    assert manifest["counts"]["documents"] == 4
+    assert manifest["counts"]["relation_rejections"] >= 1
+    assert (output_root / "schema" / "schema_revision_candidates.jsonl").exists()
+    assert (output_root / "graph" / "relation_rejections.jsonl").exists()
+    assert (output_root / "graph" / "edge_scores.jsonl").exists()
+    assert (output_root / "reports" / "case_study_report.md").exists()
 
 
 def test_schema_cli_commands_write_artifacts() -> None:
@@ -161,6 +186,45 @@ def test_relation_extraction_task_shape_is_supported() -> None:
     assert "negative_rationale" in record.output
 
 
+def test_batched_relation_extraction_task_shape_is_supported() -> None:
+    config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
+    client = build_llm_client(config.llm)
+    pairs = [
+        {
+            "source_entity": {"entity_id": "method__react", "canonical_name": "ReAct"},
+            "target_entity": {"entity_id": "method__toolformer", "canonical_name": "Toolformer"},
+            "source_document": "P1",
+            "target_document": "P2",
+            "taxonomy_nodes": ["methodologies__agents"],
+            "time_delta_days": 30,
+        },
+        {
+            "source_entity": {"entity_id": "method__cot", "canonical_name": "Chain-of-Thought"},
+            "target_entity": {"entity_id": "method__self_consistency", "canonical_name": "Self-Consistency"},
+            "source_document": "P1",
+            "target_document": "P3",
+            "taxonomy_nodes": ["methodologies__reasoning"],
+            "time_delta_days": 60,
+        },
+    ]
+    record = extract_relations_for_pairs(
+        client,
+        pairs=pairs,
+        document_texts={
+            "P1": "ReAct introduced tool-use reasoning. Chain-of-Thought improves reasoning traces.",
+            "P2": "Toolformer adapts tool-use reasoning to API calls.",
+            "P3": "Self-Consistency aggregates multiple reasoning traces.",
+        },
+        relation_schema={"adapts": {"definition": "Transfer to a new context.", "evidence_slots": ["mechanism"]}},
+        evidence_schema={"mechanism": {"definition": "Mechanism.", "required": True}},
+    )
+    assert len(record.output["relations"]) == 2
+    assert record.output["relations"][0]["pair_index"] == 0
+    assert record.output["relations"][0]["accept"] is False
+    assert record.output["relations"][1]["pair_index"] == 1
+    assert record.output["relations"][1]["rejection_reason"] == "model_not_run"
+
+
 def test_empty_enabled_tasks_does_not_call_llm() -> None:
     config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
     client = build_llm_client(config.llm)
@@ -168,6 +232,98 @@ def test_empty_enabled_tasks_does_not_call_llm() -> None:
     assert record.used_model is False
     assert record.error == "No LLM tasks enabled."
     assert record.cache_key
+
+
+def test_schema_revision_judge_rejection_blocks_promotion() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_misinformation_governance.adaptive.toml")
+    client = build_llm_client(config.llm)
+    docs = [Document(doc_id="D1", title="Audit", text="Algorithmic audit evidence is repeatedly missing.")]
+    bundle = resolve_initial_schema(config, docs, [], client)
+    audit_rows = [
+        {
+            "edge_type": "extends",
+            "status": "candidate",
+            "quote_checks": [
+                {"field": "mechanism", "ok": False, "reason": "missing_quote"},
+                {"field": "mechanism", "ok": False, "reason": "missing_quote"},
+            ],
+        }
+    ]
+    candidate_id = "evidence_review__mechanism"
+    adapted, revisions = adapt_schema_after_graph(
+        bundle,
+        edge_evidence_audit=audit_rows,
+        entity_quality_report=[],
+        config=config,
+        judgements={
+            candidate_id: {
+                "decision": "reject",
+                "confidence": 0.91,
+                "rationale": "Keep current evidence slot stable for this run.",
+                "risk": "low",
+            }
+        },
+    )
+    assert any(row.get("candidate_id") == candidate_id and row.get("judge_decision") == "reject" for row in adapted.revision_candidates)
+    assert any(row.get("candidate_id") == candidate_id and row.get("status") == "rejected" for row in revisions)
+    assert not adapted.evidence_schema["mechanism"].get("needs_review")
+
+
+def test_schema_revision_judge_task_shape_is_supported() -> None:
+    config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
+    client = build_llm_client(config.llm)
+    record = judge_schema_revision(
+        client,
+        candidate={"candidate_id": "rel__mediates", "schema_family": "relation_schema", "revision_type": "add_relation_type", "confidence": 0.7},
+        current_schema={"relation_schema": {"extends": {"definition": "Adds to prior work."}}},
+    )
+    assert record.output["decision"] == "promote"
+    assert "rationale" in record.output
+
+
+def test_edge_scoring_penalizes_temporal_violations() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    edge = EvolutionEdge(
+        edge_id="edge_temporal",
+        source_entity="intervention__new",
+        target_entity="intervention__old",
+        edge_type="extends",
+        source_document="D2",
+        target_document="D1",
+        time_delta_days=-10,
+        taxonomy_nodes=["interventions"],
+        confidence=0.8,
+        evidence={"mechanism": {"description": "Mechanism", "quote": "New intervention extends old intervention."}},
+        substring_verified=True,
+    )
+    scores = edge_score_components(
+        edge,
+        relation_schema={
+            "extends": {
+                "definition": "Adds capability to a prior intervention.",
+                "evidence_slots": ["mechanism"],
+            }
+        },
+        evidence_schema={"mechanism": {"required": True}},
+        config=config.graph,
+    )
+    assert scores["temporal_order"] == 0.0
+    assert scores["quote_grounding"] == 1.0
+    assert scores["schema_fit"] >= 0.9
+    assert scores["edge_score"] < 0.8
+    rows = score_edges(
+        [edge],
+        relation_schema={
+            "extends": {
+                "definition": "Adds capability to a prior intervention.",
+                "evidence_slots": ["mechanism"],
+            }
+        },
+        evidence_schema={"mechanism": {"required": True}},
+        config=config.graph,
+    )
+    assert rows[0]["previous_confidence"] == 0.8
+    assert edge.confidence == scores["edge_score"]
 
 
 def test_full_pipeline_can_induce_taxonomy_without_node_file() -> None:
