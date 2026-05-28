@@ -223,6 +223,7 @@ def adapt_schema_after_graph(
     edge_evidence_audit: list[dict[str, Any]],
     entity_quality_report: list[dict[str, Any]],
     config: EvoTaxaConfig,
+    relation_rejections: list[dict[str, Any]] | None = None,
     judgements: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[SchemaBundle, list[dict[str, Any]]]:
     adapted = SchemaBundle(
@@ -244,6 +245,7 @@ def adapt_schema_after_graph(
         edge_evidence_audit=edge_evidence_audit,
         entity_quality_report=entity_quality_report,
         config=config,
+        relation_rejections=relation_rejections or [],
     )
     judged_candidates = _apply_revision_judgements(candidates, judgements or {})
     revisions = promote_schema_revisions(adapted, judged_candidates, config)
@@ -258,11 +260,12 @@ def propose_schema_revision_candidates(
     edge_evidence_audit: list[dict[str, Any]],
     entity_quality_report: list[dict[str, Any]],
     config: EvoTaxaConfig,
+    relation_rejections: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
 
     if config.schema.relation_schema_mode == "adaptive":
-        candidates.extend(propose_relation_schema_revisions(bundle.relation_schema, edge_evidence_audit, config.graph))
+        candidates.extend(propose_relation_schema_revisions(bundle.relation_schema, edge_evidence_audit, config.graph, relation_rejections=relation_rejections or []))
 
     if config.schema.entity_schema_mode == "adaptive":
         candidates.extend(propose_entity_schema_revisions(bundle.entity_schema, entity_quality_report, config.schema.schema_revision_min_support))

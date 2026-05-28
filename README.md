@@ -160,6 +160,12 @@ Each run writes:
   search/
     evolution_chains.jsonl
     branch_points.jsonl
+  trajectory/
+    evolution_trajectories.jsonl
+    trajectory_eval.jsonl
+  state/
+    evolution_state.json
+    state_transitions.jsonl
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
@@ -207,6 +213,8 @@ In `run-full`, enabling `relation_extraction_batch` lets the model create schema
 
 When schema modes are `adaptive`, EvoTaxa can evolve the relation schema, entity schema, and evidence schema. A model-backed `schema_revision_judge` can decide whether each proposed schema revision should be promoted, rejected, or held for human review.
 
+Rejected relation pairs also feed back into adaptive relation schemas as negative priors and counterexamples. This prevents weak co-mentions from being treated as future evolution edges and makes schema drift inspectable.
+
 ## Edge Evidence
 
 Every edge is audited after construction. EvoTaxa checks quotes in `bottleneck`, `mechanism`, and `tradeoff` against the source and target documents, then writes:
@@ -218,7 +226,21 @@ Every edge is audited after construction. EvoTaxa checks quotes in `bottleneck`,
 - `graph/edge_scores.jsonl`: relation confidence, quote grounding, temporal order, taxonomy locality, schema fit, evidence-slot completeness, and final edge score.
 - `graph/relation_rejections.jsonl`: relation candidates rejected because they were weak co-mentions, comparison-only links, temporal violations, schema mismatches, or unsupported by quotes.
 
-Search, hooks, and feedback use trusted edges when available; if a run has no trusted edges, they fall back to candidate edges so small exploratory corpora still produce inspectable outputs.
+## Evolution State And Trajectory
+
+EvoTaxa writes an explicit state layer:
+
+- `state/evolution_state.json`: the current domain state, including document slices, taxonomy node states, entity mix, relation mix, and active schema.
+- `state/state_transitions.jsonl`: taxonomy transitions, schema transitions, relation-quality transitions, and negative-relation transitions.
+
+It also writes a trajectory layer:
+
+- `trajectory/evolution_trajectories.jsonl`: inferred evolution trajectories scored by edge confidence, temporal coherence, quote grounding, schema coherence, and taxonomy locality.
+- `trajectory/trajectory_eval.jsonl`: intrinsic trajectory health metrics.
+
+The legacy `search/evolution_chains.jsonl` path is retained for compatibility, but the algorithmic layer is trajectory inference rather than search.
+
+Hooks and feedback use trusted edges when available; if a run has no trusted edges, they fall back to candidate edges so small exploratory corpora still produce inspectable outputs.
 
 ## Taxonomy-Graph Co-Evolution
 

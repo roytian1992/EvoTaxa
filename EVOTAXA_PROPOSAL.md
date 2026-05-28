@@ -394,9 +394,10 @@ The evolution loop is:
 5. Use the schema inside batched relation extraction and edge-evidence judging prompts.
 6. Audit outputs: trusted edges, candidate edges, rejected relation pairs, relation confusion, and unverified evidence.
 7. Score every edge with relation confidence, quote grounding, temporal order, taxonomy locality, schema fit, and evidence-slot completeness.
-8. In adaptive mode, propose schema revisions: add relation type, merge relation types, split ambiguous relation type, rename unclear type, or tighten evidence requirements.
-9. Run a schema revision judge over proposed revisions. The judge can promote, reject, or hold a revision for human review.
-10. Promote only revisions with enough support and a compatible judge decision, then write them as a new schema version.
+8. Feed rejected relation pairs back as negative priors and relation counterexamples.
+9. In adaptive mode, propose schema revisions: add relation type, merge relation types, split ambiguous relation type, rename unclear type, or tighten evidence requirements.
+10. Run a schema revision judge over proposed revisions. The judge can promote, reject, or hold a revision for human review.
+11. Promote only revisions with enough support and a compatible judge decision, then write them as a new schema version.
 
 This gives us two useful experimental settings: a stable fixed-schema graph for fair comparison, and an adaptive-schema graph for domain transfer.
 
@@ -612,6 +613,12 @@ data/evotaxa/<run_id>/
   search/
     evolution_chains.jsonl
     branch_points.jsonl
+  trajectory/
+    evolution_trajectories.jsonl
+    trajectory_eval.jsonl
+  state/
+    evolution_state.json
+    state_transitions.jsonl
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
@@ -831,22 +838,24 @@ branch_points.jsonl
 forecast_hooks.jsonl
 ```
 
-### Phase 4: Search Upgrade
+### Phase 4: Trajectory Modeling Upgrade
 
-Goal: replace simple lineage search with self-guided temporal search.
+Goal: replace simple lineage chaining with evolution trajectory inference.
 
 Tasks:
 
 - Implement temporal coherence scoring.
 - Add graph-aware priors.
-- Add branch re-search with masked visited edges.
+- Add branch-aware trajectory construction with masked visited edges.
 - Compare with beam search and greedy DFS.
 
 Deliverables:
 
 ```text
-lineage_search_results.jsonl
-lineage_search_eval.json
+trajectory/evolution_trajectories.jsonl
+trajectory/trajectory_eval.jsonl
+state/evolution_state.json
+state/state_transitions.jsonl
 ```
 
 ### Phase 5: ForeSci Integration

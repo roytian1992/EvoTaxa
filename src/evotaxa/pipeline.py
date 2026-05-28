@@ -38,7 +38,9 @@ from evotaxa.llm import build_llm_client, extract_document_entities, extract_rel
 from evotaxa.schema import adapt_schema_after_graph, propose_schema_revision_candidates, resolve_initial_schema
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
+from evotaxa.state import build_evolution_state_snapshot, build_state_transition_report
 from evotaxa.taxonomy import build_taxonomy_events, enrich_taxonomy_nodes, judge_taxonomy_quality
+from evotaxa.trajectory import infer_evolution_trajectories
 
 
 def run_lite(config_or_path: EvoTaxaConfig | str | Path) -> dict[str, Any]:
@@ -151,10 +153,12 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
         edge_evidence_audit=graph_layer["edge_evidence_audit"],
         entity_quality_report=entity_quality_report,
         config=config,
+        relation_rejections=graph_layer["relation_rejections"],
         judgements=_judge_schema_revision_candidates(
             schema_bundle,
             edge_evidence_audit=graph_layer["edge_evidence_audit"],
             entity_quality_report=entity_quality_report,
+            relation_rejections=graph_layer["relation_rejections"],
             config=config,
             llm_client=llm_client,
             llm_records=llm_records,
@@ -222,10 +226,12 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
                 edge_evidence_audit=graph_layer["edge_evidence_audit"],
                 entity_quality_report=entity_quality_report,
                 config=config,
+                relation_rejections=graph_layer["relation_rejections"],
                 judgements=_judge_schema_revision_candidates(
                     schema_bundle,
                     edge_evidence_audit=graph_layer["edge_evidence_audit"],
                     entity_quality_report=entity_quality_report,
+                    relation_rejections=graph_layer["relation_rejections"],
                     config=config,
                     llm_client=llm_client,
                     llm_records=llm_records,
@@ -241,6 +247,20 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     feedback_events = synthesize_feedback_events(feedback_rows) if full else []
     taxonomy_events = [*taxonomy_events, *feedback_events]
     hook_score_report = build_hook_score_report(forecast_hooks) if full else {"hook_count": len(forecast_hooks)}
+    state_snapshot = build_evolution_state_snapshot(
+        docs=docs,
+        nodes=nodes,
+        entities=entities,
+        edges=graph_layer["downstream_edges"],
+        taxonomy_events=taxonomy_events,
+        schema_bundle=schema_bundle,
+    )
+    state_transitions = build_state_transition_report(
+        taxonomy_events=taxonomy_events,
+        schema_revisions=schema_revisions,
+        edge_score_rows=graph_layer["edge_score_rows"],
+        relation_rejections=graph_layer["relation_rejections"],
+    )
     quality_report = build_quality_report(
         node_quality=node_quality,
         entity_quality_report=entity_quality_report,
@@ -305,6 +325,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
 
     write_jsonl(output_root / "search" / "evolution_chains.jsonl", (chain.to_record() for chain in graph_layer["chains"]))
     write_jsonl(output_root / "search" / "branch_points.jsonl", graph_layer["branch_points"])
+    write_jsonl(output_root / "trajectory" / "evolution_trajectories.jsonl", graph_layer["trajectory_rows"])
+    write_jsonl(output_root / "trajectory" / "trajectory_eval.jsonl", graph_layer["trajectory_eval"])
+    write_json(output_root / "state" / "evolution_state.json", state_snapshot)
+    write_jsonl(output_root / "state" / "state_transitions.jsonl", state_transitions)
     write_jsonl(output_root / "hooks" / "forecast_hooks.jsonl", forecast_hooks)
     write_jsonl(output_root / "hooks" / "social_analysis_hooks.jsonl", social_hooks)
     write_json(output_root / "hooks" / "hook_score_report.json", hook_score_report)
@@ -362,6 +386,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "downstream_edges": len(graph_layer["downstream_edges"]),
             "aggregated_edges": len(graph_layer["aggregated_edges"]),
             "evolution_chains": len(graph_layer["chains"]),
+            "trajectories": len(graph_layer["trajectory_rows"]),
+            "state_transitions": len(state_transitions),
             "branch_points": len(graph_layer["branch_points"]),
             "forecast_hooks": len(forecast_hooks),
             "social_analysis_hooks": len(social_hooks),
@@ -400,6 +426,10 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "edge_scores": "graph/edge_scores.jsonl",
             "edge_evidence_audit": "graph/edge_evidence_audit.jsonl",
             "evolution_chains": "search/evolution_chains.jsonl",
+            "trajectories": "trajectory/evolution_trajectories.jsonl",
+            "trajectory_eval": "trajectory/trajectory_eval.jsonl",
+            "evolution_state": "state/evolution_state.json",
+            "state_transitions": "state/state_transitions.jsonl",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
             "taxonomy_graph_feedback": "feedback/taxonomy_graph_feedback.jsonl",
             "quality_report": "evaluation/quality_report.json",
@@ -467,6 +497,7 @@ def _judge_schema_revision_candidates(
     *,
     edge_evidence_audit: list[dict[str, Any]],
     entity_quality_report: list[dict[str, Any]],
+    relation_rejections: list[dict[str, Any]],
     config: EvoTaxaConfig,
     llm_client: Any,
     llm_records: list[Any],
@@ -476,6 +507,7 @@ def _judge_schema_revision_candidates(
         edge_evidence_audit=edge_evidence_audit,
         entity_quality_report=entity_quality_report,
         config=config,
+        relation_rejections=relation_rejections,
     )
     judgements: dict[str, dict[str, Any]] = {}
     for candidate in candidates[: max(0, config.schema.max_schema_revisions or len(candidates))]:
@@ -545,7 +577,12 @@ def _build_graph_layer(
     trusted_edges, candidate_edges, unverified_edges, edge_evidence_audit = stratify_edges_by_evidence(edges, docs, config.graph)
     downstream_edges = _downstream_edges(trusted_edges, candidate_edges, unverified_edges)
     aggregated_edges = aggregate_edges(downstream_edges)
-    chains = search_evolution_chains(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    legacy_chains = search_evolution_chains(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    chains, trajectory_rows, trajectory_eval = infer_evolution_trajectories(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
+    if not chains:
+        chains = legacy_chains
+        trajectory_rows = [chain.to_record() | {"trajectory_id": chain.chain_id, "trajectory_score": chain.score, "path_length": len(chain.edge_path)} for chain in chains]
+        trajectory_eval = []
     branch_points = extract_branch_points(downstream_edges, strong_edge_types=config.graph.strong_edge_types)
     forecast_hooks = build_forecast_hooks(downstream_edges, chains, branch_points, strong_edge_types=config.graph.strong_edge_types)
     edge_index = {edge.edge_id: edge.to_record() for edge in downstream_edges}
@@ -562,6 +599,9 @@ def _build_graph_layer(
         "downstream_edges": downstream_edges,
         "aggregated_edges": aggregated_edges,
         "chains": chains,
+        "legacy_chains": legacy_chains,
+        "trajectory_rows": trajectory_rows,
+        "trajectory_eval": trajectory_eval,
         "branch_points": branch_points,
         "forecast_hooks": forecast_hooks,
     }

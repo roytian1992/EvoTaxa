@@ -403,9 +403,10 @@ diffuses_to, institutionalizes, reframes, operationalizes, mediates, moderates, 
 5. 把 schema 注入批量 relation extraction 和 edge-evidence judging prompt。
 6. 审计输出：trusted edges、candidate edges、被拒绝的 relation pairs、relation confusion、unverified evidence。
 7. 给每条边打分：relation confidence、quote grounding、temporal order、taxonomy locality、schema fit、evidence-slot completeness。
-8. 如果是 adaptive 模式，提出 schema revision：新增关系、合并关系、拆分含混关系、重命名关系、收紧证据要求。
-9. 对 schema revision candidate 运行 schema revision judge。judge 可以 promote、reject，或者标记为 needs human review。
-10. 只有达到支持阈值并通过 judge 决策的 revision 才能 promote，并写成新的 schema version。
+8. 把被拒绝的 relation pairs 作为 negative priors 和 relation counterexamples 反馈回 schema。
+9. 如果是 adaptive 模式，提出 schema revision：新增关系、合并关系、拆分含混关系、重命名关系、收紧证据要求。
+10. 对 schema revision candidate 运行 schema revision judge。judge 可以 promote、reject，或者标记为 needs human review。
+11. 只有达到支持阈值并通过 judge 决策的 revision 才能 promote，并写成新的 schema version。
 
 这样我们会同时拥有两种实验设置：固定 schema 的图用于公平比较，自适应 schema 的图用于跨领域迁移。
 
@@ -621,6 +622,12 @@ data/evotaxa/<run_id>/
   search/
     evolution_chains.jsonl
     branch_points.jsonl
+  trajectory/
+    evolution_trajectories.jsonl
+    trajectory_eval.jsonl
+  state/
+    evolution_state.json
+    state_transitions.jsonl
   hooks/
     forecast_hooks.jsonl
     social_analysis_hooks.jsonl
@@ -842,22 +849,24 @@ branch_points.jsonl
 forecast_hooks.jsonl
 ```
 
-### Phase 4：Search Upgrade
+### Phase 4：Trajectory Modeling Upgrade
 
-目标：用 self-guided temporal search 替代简单 lineage search。
+目标：用 evolution trajectory inference 替代简单 lineage chaining。
 
 任务：
 
 - 实现 temporal coherence scoring。
 - 加入 graph-aware priors。
-- 加入 masked visited edges 的 branch re-search。
+- 加入 masked visited edges 的 branch-aware trajectory construction。
 - 与 beam search 和 greedy DFS 比较。
 
 Deliverables：
 
 ```text
-lineage_search_results.jsonl
-lineage_search_eval.json
+trajectory/evolution_trajectories.jsonl
+trajectory/trajectory_eval.jsonl
+state/evolution_state.json
+state/state_transitions.jsonl
 ```
 
 ### Phase 5：ForeSci Integration

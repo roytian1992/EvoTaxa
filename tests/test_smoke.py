@@ -12,6 +12,8 @@ from evotaxa.llm import build_llm_client, extract_relation_for_pair, extract_rel
 from evotaxa.models import Document, EvolutionEdge
 from evotaxa.pipeline import run_full, run_lite
 from evotaxa.schema import adapt_schema_after_graph, resolve_initial_schema
+from evotaxa.state import build_evolution_state_snapshot, build_state_transition_report
+from evotaxa.trajectory import infer_evolution_trajectories
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +83,10 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "graph" / "relation_extraction_report.jsonl").exists()
     assert (output_root / "graph" / "relation_rejections.jsonl").exists()
     assert (output_root / "graph" / "edge_scores.jsonl").exists()
+    assert (output_root / "trajectory" / "evolution_trajectories.jsonl").exists()
+    assert (output_root / "trajectory" / "trajectory_eval.jsonl").exists()
+    assert (output_root / "state" / "evolution_state.json").exists()
+    assert (output_root / "state" / "state_transitions.jsonl").exists()
     assert (output_root / "graph" / "method_edges.trusted.jsonl").exists()
     assert (output_root / "graph" / "method_edges.candidate.jsonl").exists()
     assert (output_root / "graph" / "method_edges.unverified.jsonl").exists()
@@ -90,7 +96,10 @@ def test_full_pipeline_writes_expansion_and_feedback_artifacts() -> None:
     assert (output_root / "reports" / "case_study_report.md").exists()
     assert (output_root / "hooks" / "hook_score_report.json").exists()
     assert manifest["counts"]["edge_scores"] >= manifest["counts"]["paper_level_edges"]
+    assert manifest["counts"]["trajectories"] >= 1
+    assert manifest["counts"]["state_transitions"] >= 1
     assert manifest["artifact_layout"]["case_study_report"] == "reports/case_study_report.md"
+    assert manifest["artifact_layout"]["trajectories"] == "trajectory/evolution_trajectories.jsonl"
 
 
 def test_local_llm_config_shape_is_supported() -> None:
@@ -269,6 +278,26 @@ def test_schema_revision_judge_rejection_blocks_promotion() -> None:
     assert not adapted.evidence_schema["mechanism"].get("needs_review")
 
 
+def test_relation_rejections_feed_schema_negative_priors() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_misinformation_governance.adaptive.toml")
+    client = build_llm_client(config.llm)
+    docs = [Document(doc_id="D1", title="Audit", text="Platform labeling and survey experiments are compared without mechanism evidence.")]
+    bundle = resolve_initial_schema(config, docs, [], client)
+    adapted, revisions = adapt_schema_after_graph(
+        bundle,
+        edge_evidence_audit=[],
+        entity_quality_report=[],
+        relation_rejections=[
+            {"edge_type": "background", "source_entity": "intervention__platform_labeling", "target_entity": "measurement_strategy__survey_experiment", "rejection_reason": "weak_co_mention"},
+            {"edge_type": "background", "source_entity": "intervention__platform_labeling", "target_entity": "actor__communities", "rejection_reason": "weak_co_mention"},
+        ],
+        config=config,
+    )
+    assert any(row.get("revision_type") == "update_negative_prior" for row in adapted.revision_candidates)
+    assert any(row.get("revision_type") == "update_negative_prior" and row.get("status") == "applied" for row in revisions)
+    assert adapted.relation_schema["background"]["negative_priors"]["weak_co_mention"] == 2
+
+
 def test_schema_revision_judge_task_shape_is_supported() -> None:
     config = load_config(REPO_ROOT / "configs" / "scientific_research.example.toml")
     client = build_llm_client(config.llm)
@@ -324,6 +353,76 @@ def test_edge_scoring_penalizes_temporal_violations() -> None:
     )
     assert rows[0]["previous_confidence"] == 0.8
     assert edge.confidence == scores["edge_score"]
+
+
+def test_trajectory_inference_filters_temporal_violations() -> None:
+    good = EvolutionEdge(
+        edge_id="good",
+        source_entity="a",
+        target_entity="b",
+        edge_type="extends",
+        source_document="D1",
+        target_document="D2",
+        time_delta_days=20,
+        taxonomy_nodes=["n1"],
+        confidence=0.82,
+        evidence={"edge_score": {"schema_fit": 1.0}},
+        substring_verified=True,
+    )
+    bad = EvolutionEdge(
+        edge_id="bad",
+        source_entity="b",
+        target_entity="c",
+        edge_type="extends",
+        source_document="D2",
+        target_document="D1",
+        time_delta_days=-20,
+        taxonomy_nodes=["n1"],
+        confidence=0.9,
+        evidence={"edge_score": {"schema_fit": 1.0}},
+        substring_verified=True,
+    )
+    chains, rows, evaluation = infer_evolution_trajectories([good, bad], strong_edge_types=["extends"])
+    assert len(chains) == 1
+    assert rows[0]["edge_path"] == ["good"]
+    assert any(row["metric"] == "temporal_coherence" for row in evaluation)
+
+
+def test_evolution_state_snapshot_and_transitions_are_built() -> None:
+    config = load_config(REPO_ROOT / "configs" / "social_science.example.toml")
+    client = build_llm_client(config.llm)
+    doc = Document(doc_id="D1", title="Platform labeling", text="Platform labeling extends warning labels.")
+    bundle = resolve_initial_schema(config, [doc], [], client)
+    edge = EvolutionEdge(
+        edge_id="edge_state",
+        source_entity="intervention__warning_labels",
+        target_entity="intervention__platform_labeling",
+        edge_type="extends",
+        source_document="D1",
+        target_document="D1",
+        time_delta_days=0,
+        taxonomy_nodes=["interventions__labeling"],
+        confidence=0.7,
+        evidence={},
+        substring_verified=True,
+    )
+    node = type("Node", (), {"node_id": "interventions__labeling", "dimension": "interventions", "canonical_label": "Labeling", "support_documents": ["D1"]})()
+    state = build_evolution_state_snapshot(
+        docs=[doc],
+        nodes=[node],
+        entities=[],
+        edges=[edge],
+        taxonomy_events=[{"event_id": "birth__labeling", "event_type": "birth", "target_node_ids": ["interventions__labeling"], "confidence": 0.7}],
+        schema_bundle=bundle,
+    )
+    transitions = build_state_transition_report(
+        taxonomy_events=[{"event_id": "birth__labeling", "event_type": "birth", "target_node_ids": ["interventions__labeling"], "confidence": 0.7}],
+        schema_revisions=[],
+        edge_score_rows=[{"edge_id": "edge_state", "edge_score": 0.5, "temporal_order": 0.8, "source_entity": "a", "target_entity": "b"}],
+        relation_rejections=[{"rejection_reason": "weak_co_mention"}],
+    )
+    assert state["taxonomy"]["node_states"][0]["state"] == "emerging"
+    assert any(row["transition_family"] == "negative_relation" for row in transitions)
 
 
 def test_full_pipeline_can_induce_taxonomy_without_node_file() -> None:

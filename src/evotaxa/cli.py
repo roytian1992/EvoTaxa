@@ -168,6 +168,7 @@ def _adapt_schema_command(config_path: Path, run_root: Path | None) -> dict[str,
         edge_evidence_audit=edge_audit,
         entity_quality_report=entity_report,
         config=config,
+        relation_rejections=list(iter_jsonl(root / "graph" / "relation_rejections.jsonl")) if (root / "graph" / "relation_rejections.jsonl").exists() else [],
     )
     schema_root = root / "schema"
     write_json(schema_root / "entity_schema.final.json", adapted.entity_schema)

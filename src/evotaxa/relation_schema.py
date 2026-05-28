@@ -163,6 +163,7 @@ def propose_relation_schema_revisions(
     schema: dict[str, dict[str, Any]],
     edge_evidence_audit: list[dict[str, Any]],
     config: GraphConfig,
+    relation_rejections: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -205,7 +206,55 @@ def propose_relation_schema_revisions(
                     "reason": "Relation type repeatedly produced candidate edges rather than trusted edges.",
                 }
             )
+    candidates.extend(_negative_evidence_revision_candidates(schema, relation_rejections or [], config))
     return sorted(candidates, key=lambda row: (-float(row.get("confidence") or 0.0), row.get("candidate_id", "")))
+
+
+def _negative_evidence_revision_candidates(
+    schema: dict[str, dict[str, Any]],
+    relation_rejections: list[dict[str, Any]],
+    config: GraphConfig,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    if not relation_rejections:
+        return candidates
+    min_support = max(1, config.relation_schema_adaptation_min_support)
+    by_reason = Counter(str(row.get("rejection_reason") or "unknown") for row in relation_rejections)
+    prior_edge_type = "background" if "background" in schema else sorted(schema)[0]
+    for reason, count in sorted(by_reason.items()):
+        if count < min_support:
+            continue
+        candidates.append(
+            {
+                "candidate_id": f"relation_negative_prior__{slugify(reason)}",
+                "schema_family": "relation_schema",
+                "schema_name": prior_edge_type,
+                "revision_type": "update_negative_prior",
+                "edge_type": prior_edge_type,
+                "support": count,
+                "rejection_reason": reason,
+                "confidence": round(min(0.92, 0.42 + 0.05 * count), 3),
+                "reason": "Rejected relation pairs provide negative evidence for pair generation and schema interpretation.",
+            }
+        )
+    by_edge_type = Counter(str(row.get("edge_type") or "background") for row in relation_rejections)
+    for edge_type, count in sorted(by_edge_type.items()):
+        if count < min_support or edge_type not in schema:
+            continue
+        candidates.append(
+            {
+                "candidate_id": f"relation_counterexamples__{slugify(edge_type)}",
+                "schema_family": "relation_schema",
+                "schema_name": edge_type,
+                "revision_type": "add_counterexamples",
+                "edge_type": edge_type,
+                "support": count,
+                "counterexamples": _counterexamples_for(edge_type, relation_rejections),
+                "confidence": round(min(0.9, 0.4 + 0.04 * count), 3),
+                "reason": "Relation type accumulated rejected pairs that should constrain future extraction.",
+            }
+        )
+    return candidates
 
 
 def apply_relation_schema_revisions(
@@ -233,6 +282,16 @@ def apply_relation_schema_revisions(
             spec["observed_verified_rate"] = float(candidate.get("verified_rate") or 0.0)
             spec["observed_mean_confidence"] = float(candidate.get("mean_confidence") or 0.0)
         elif revision_type == "mark_needs_review":
+            spec["needs_review"] = True
+        elif revision_type == "update_negative_prior":
+            spec["schema_source"] = "adaptive"
+            spec["negative_priors"] = dict(spec.get("negative_priors") or {})
+            reason = str(candidate.get("rejection_reason") or "unknown")
+            spec["negative_priors"][reason] = int(candidate.get("support") or 0)
+        elif revision_type == "add_counterexamples":
+            counterexamples = set(str(item) for item in spec.get("counterexamples") or [] if str(item).strip())
+            counterexamples.update(str(item) for item in candidate.get("counterexamples") or [] if str(item).strip())
+            spec["counterexamples"] = sorted(counterexamples)
             spec["needs_review"] = True
         else:
             report.append({**candidate, "status": "rejected", "decision": "rejected", "reason": "unsupported_revision_type"})
@@ -287,3 +346,15 @@ def _limit_schema(schema: dict[str, dict[str, Any]], limit: int) -> dict[str, di
     keys = [key for key in preferred if key in schema]
     keys.extend(key for key in sorted(schema) if key not in set(keys))
     return {key: schema[key] for key in keys[:limit]}
+
+
+def _counterexamples_for(edge_type: str, relation_rejections: list[dict[str, Any]], limit: int = 8) -> list[str]:
+    rows = [row for row in relation_rejections if str(row.get("edge_type") or "background") == edge_type]
+    examples = []
+    for row in rows[:limit]:
+        source = str(row.get("source_entity") or "")
+        target = str(row.get("target_entity") or "")
+        reason = str(row.get("rejection_reason") or "unknown")
+        if source or target:
+            examples.append(f"{source} -> {target}: {reason}")
+    return examples
