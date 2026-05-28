@@ -16,6 +16,8 @@ The core idea is to model a domain as an evolving state, not just as a flat set 
 
 ## Algorithm Flow
 
+![EvoTaxa overall architecture](assets/overall_architecture.png)
+
 EvoTaxa runs as a closed-loop evolution modeling algorithm:
 
 ```text
