@@ -118,6 +118,66 @@ cutoff 边界是硬约束。任何 post-cutoff 文档都不能进入 taxonomy in
 
 这些维度不应该写死在代码里，而应该放在 config 里管理。
 
+### Taxonomy Node 是什么？
+
+taxonomy node 是 EvoTaxa 用来定位领域演化的基本语义单元。它不只是 keyword、topic label、cluster id 或 document tag。一个 node 表示一个语义边界清楚的领域区域，包含：
+
+- 名称和别名。
+- 语义边界。
+- inclusion criteria 和 exclusion criteria。
+- 支撑文档。
+- 代表性文档和反例文档。
+- 时间状态。
+- 与 evolution entities 和 relations 的连接。
+
+换句话说，一个 node 要回答：
+
+```text
+这是什么类型的领域对象？
+哪些文档应该属于这里？
+哪些相邻概念不应该被放进来？
+这个区域是如何出现、分裂、合并或衰退的？
+有哪些 entities 和 mechanisms 在这里面演化？
+```
+
+node 可以很宽，也可以很细。宽 node 用来组织领域结构，细 node 用来捕捉新出现的子方向。EvoTaxa 预期在科研语料里 node 会随着领域分化变得越来越具体；但在 social science 场景里，node 也可能发生 cross-link、stabilization 或 recontextualization。
+
+例子：
+
+```text
+AI research / methodologies
+  node_id: methodologies__retrieval_augmented_generation
+  label: retrieval-augmented generation
+  boundary: 结合 retrieval 和 generative models 的方法
+  excludes: 不涉及 generation 的普通 information retrieval
+
+AI research / evaluation_methods
+  node_id: evaluation__llm_judges
+  label: LLM-as-a-judge evaluation
+  boundary: 使用 LLM 作为评分器、偏好判断器或自动评审者的 evaluation protocols
+  excludes: 纯人工标注或普通 benchmark scoring
+
+Computational social science / text-as-data
+  node_id: methods__embedding_based_measurement
+  label: embedding-based measurement
+  boundary: 使用 vector representations 从文本中测量社会科学 constructs 的方法
+  excludes: 只使用 dictionary 的 content analysis
+
+Computational social science / LLM-assisted methods
+  node_id: methods__llm_annotation
+  label: LLM-assisted annotation
+  boundary: 使用 LLM 给 social-science data 做 label、code 或 annotation
+  excludes: 只研究公众如何看待 AI 的论文
+
+Misinformation governance / interventions
+  node_id: interventions__prebunking
+  label: prebunking interventions
+  boundary: 在 misinformation 暴露前预先揭示操纵手法的 interventions
+  excludes: 暴露后才进行的 fact-checking，且没有 pre-exposure inoculation
+```
+
+同一个表面短语在不同维度里可以是不同 node。例如 `algorithmic audit` 在某个 run 里可以是 `measurement_strategy`，在另一个 run 里可以是 `policy_instrument`。所以 EvoTaxa 把 node 视为带有维度约束的语义区域，而不是一个全局固定 label。
+
 ### 节点 Schema
 
 每个 taxonomy node 不应该只有 label 和 description，而应该携带更完整的边界、证据和状态信息：

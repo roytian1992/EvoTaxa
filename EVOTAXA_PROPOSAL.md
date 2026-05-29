@@ -113,6 +113,66 @@ For social science, the dimensions can become:
 - `outcomes`
 - `public_frames`
 
+### What Is a Taxonomy Node?
+
+A taxonomy node is the basic semantic unit EvoTaxa uses to localize evolution. It is not just a keyword, topic label, cluster id, or document tag. A node represents a coherent domain region with:
+
+- a name and aliases,
+- a semantic boundary,
+- inclusion and exclusion criteria,
+- supporting documents,
+- representative and counterexample documents,
+- temporal status,
+- links to evolution entities and relations.
+
+In other words, a node answers:
+
+```text
+What kind of thing is this?
+Which documents belong here?
+Which nearby things should not be included?
+How did this region appear, split, merge, or decline over time?
+What entities and mechanisms evolve inside it?
+```
+
+A node can be broad or fine-grained. Broad nodes organize the domain; fine-grained nodes capture emerging subdirections. EvoTaxa expects nodes to become more specific when a corpus differentiates, but it also allows nodes to become cross-linked, stabilized, or recontextualized in social-science settings.
+
+Examples:
+
+```text
+AI research / methodologies
+  node_id: methodologies__retrieval_augmented_generation
+  label: retrieval-augmented generation
+  boundary: methods that combine retrieval with generative models
+  excludes: generic information retrieval without generation
+
+AI research / evaluation_methods
+  node_id: evaluation__llm_judges
+  label: LLM-as-a-judge evaluation
+  boundary: evaluation protocols using LLMs as graders or preference judges
+  excludes: human-only annotation or ordinary benchmark scoring
+
+Computational social science / text-as-data
+  node_id: methods__embedding_based_measurement
+  label: embedding-based measurement
+  boundary: methods that use vector representations to measure social constructs from text
+  excludes: dictionary-only content analysis
+
+Computational social science / LLM-assisted methods
+  node_id: methods__llm_annotation
+  label: LLM-assisted annotation
+  boundary: using LLMs to label, code, or annotate social-science data
+  excludes: papers that only study public opinion about AI
+
+Misinformation governance / interventions
+  node_id: interventions__prebunking
+  label: prebunking interventions
+  boundary: interventions that preemptively expose manipulation techniques before misinformation exposure
+  excludes: post-hoc fact-checking without pre-exposure inoculation
+```
+
+The same surface phrase can belong to different nodes depending on dimension. For example, `algorithmic audit` may be a `measurement_strategy` in one run and a `policy_instrument` in another. EvoTaxa therefore treats the node as a dimension-bound semantic region, not as a universal label.
+
 ### Node Schema
 
 Each taxonomy node should carry more than a label and description:
