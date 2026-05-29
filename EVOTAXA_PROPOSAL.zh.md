@@ -270,6 +270,21 @@ expansion_score =
 + evaluation_or_measurement_shift_signal
 ```
 
+这个公式不是说这些项必须简单等权相加。真正实现时，每个 signal 应该先在同一个 time slice 内做 normalize，再由任务配置文件决定权重。核心意思是：taxonomy expansion 不应该只看“文档变多了”，还要看边界是否失效、内部是否分化、是否出现新实体、新瓶颈或新的评价/测量方式。
+
+### Trigger Signal Definitions
+
+| Signal | 它衡量什么 | 直观含义 | 例子 |
+|---|---|---|---|
+| `document_density` | 一个 node 里被分配进来的文档数量，可以按时间片、兄弟节点或历史基线归一化。 | 这个 node 可能太拥挤，需要更细的结构。 | `LLM-assisted methods` 在一年内突然聚集大量论文。 |
+| `unassigned_mass` | 不能被现有 taxonomy nodes 高置信度接住的文档比例或数量。 | 当前 taxonomy 缺了一个语义区域，需要横向扩展。 | 很多关于 `synthetic survey respondents` 的论文既不像传统 survey methods，也不像普通 text-as-data。 |
+| `semantic_heterogeneity` | 已经分配到同一个 node 的文档内部是否语义差异很大，可由 embedding、抽取出的 entities 或 LLM 边界判断来估计。 | 一个 node 里面混进了多个含义，可能需要 split。 | `algorithmic auditing` 同时包含技术 bias measurement、法律合规、平台问责三类论文。 |
+| `assignment_uncertainty` | 文档被分配到多个兄弟节点时，分数是否很接近。 | node 边界不清楚，可能需要改边界、加 alias，或者生成 merge candidate。 | 一篇论文同时像 `LLM annotation` 和 `survey automation`，且置信度接近。 |
+| `temporal_burst` | 某个 node、术语、entity 或局部 cluster 相比过去是否突然增长。 | 可能有新方向出生，或者旧方向发生快速转向。 | 新一代 LLM 系统出现后，`RAG evaluation` 相关论文突然增多。 |
+| `entity_burst` | 一个 node 内部是否突然出现很多新的 evolution entities，例如 methods、datasets、measures、interventions、evaluation protocols。 | 不只是文档数量增加，而是内部机制开始分化。 | misinformation node 里突然出现 prebunking games、inoculation messages、platform prompts、field experiments 等多种 intervention entities。 |
+| `bottleneck_concentration` | 多篇文档是否集中指向同一个限制、失败模式、数据缺口、validity concern 或 measurement problem。 | 领域可能正在围绕一个共同瓶颈形成新分支。 | 很多 LLM annotation 论文反复讨论 reliability、construct validity 和 prompt sensitivity。 |
+| `evaluation_or_measurement_shift_signal` | 领域的评价方式或测量方式是否发生变化。 | 一个方法区域可能正在围绕新的证据标准重新组织。 | CSS 主题从 dictionary counts 转向 embedding-based construct measurement；AI 方法从 benchmark accuracy 转向 LLM-as-a-judge evaluation。 |
+
 ### Trigger Interpretation
 
 - 高 unlabeled mass：触发 width expansion。

@@ -255,15 +255,30 @@ The current system expands based mainly on density and unlabeled mass. EvoTaxa s
 
 ```text
 expansion_score =
-  paper_density
+  document_density
 + unassigned_mass
 + semantic_heterogeneity
 + assignment_uncertainty
 + temporal_burst
-+ method_entity_burst
++ entity_burst
 + bottleneck_concentration
-+ evaluation_shift_signal
++ evaluation_or_measurement_shift_signal
 ```
+
+The formula is not meant to be a fixed unweighted sum. In implementation, each signal should be normalized within a time slice and weighted by a task config. The key idea is that expansion should be triggered by several kinds of evidence, not only by the number of documents.
+
+### Trigger Signal Definitions
+
+| Signal | What it measures | Intuition | Example |
+|---|---|---|---|
+| `document_density` | How many documents are assigned to a node, usually normalized by time slice, sibling nodes, or historical baseline. | A node may be too crowded and needs finer structure. | A broad `LLM-assisted methods` node receives many new papers in one year. |
+| `unassigned_mass` | The share or count of documents that cannot be confidently assigned to existing nodes. | The current taxonomy is missing a semantic region. | Many papers about `synthetic survey respondents` do not fit existing text-as-data or survey-method nodes. |
+| `semantic_heterogeneity` | How internally diverse the assigned documents are, measured by embeddings, extracted entities, or LLM boundary checks. | A node contains multiple meanings and may need to split. | `algorithmic auditing` contains technical bias measurement, legal compliance, and platform accountability papers. |
+| `assignment_uncertainty` | Whether documents receive similar assignment scores for several sibling nodes. | Node boundaries are unclear; the system may need boundary refinement, alias handling, or merge candidates. | A paper fits both `LLM annotation` and `survey automation` with similar confidence. |
+| `temporal_burst` | Whether a node, phrase, entity, or local cluster grows sharply compared with its past baseline. | Something may have newly appeared or rapidly shifted. | `RAG evaluation` papers suddenly increase after a new generation of LLM systems. |
+| `entity_burst` | Whether many new evolution entities appear inside a node, such as methods, datasets, measures, interventions, or evaluation protocols. | The node is not only receiving more documents; its internal mechanisms are diversifying. | A misinformation node suddenly introduces prebunking games, inoculation messages, platform prompts, and field experiments. |
+| `bottleneck_concentration` | Whether many documents point to the same limitation, failure mode, dataset gap, validity concern, or unresolved measurement issue. | The area may be ready for a new branch because papers are converging on the same constraint. | Many LLM annotation papers repeatedly mention reliability, construct validity, and prompt sensitivity. |
+| `evaluation_or_measurement_shift_signal` | Whether the way the field evaluates systems or measures constructs has changed. | A method area may be reorganizing around a new standard of evidence. | A CSS topic moves from dictionary counts to embedding-based construct measurement, or an AI method moves from benchmark accuracy to LLM-as-judge evaluation. |
 
 ### Trigger Interpretation
 
