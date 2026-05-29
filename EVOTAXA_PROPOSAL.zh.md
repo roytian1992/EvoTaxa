@@ -765,6 +765,137 @@ EvoTaxa 可以通过替换 entity vocabulary 迁移到 social science。
 - AI governance 如何从 model-risk framing 演化到 institutional accountability、auditing 和 regulatory design。
 - education inequality interventions 如何从 resource access 转向 learning analytics、tutoring 和 family/community mechanisms。
 
+### Two-Level Evolution View
+
+social science 的演化不应该被强行压成一种图或一种叙事。有些领域像科研方法演化，核心是概念不断分化、taxonomy 粒度越来越细；另一些领域会出现旧 motif 回归、问题被重新语境化、制度周期、公共框架迁移等现象。EvoTaxa 应该同时支持这些情况，但不能把 recurrence 写死成默认解释。
+
+推荐设计是 two-level view：
+
+```text
+Micro View: evidence-grounded local mechanisms
+Macro View: adaptive pattern synthesis
+```
+
+#### Micro View
+
+micro view 解释局部演化：
+
+- 哪些 entities、concepts、methods、interventions 或 measurement tools 发生了变化？
+- 它们之间由哪种 typed relation 连接？
+- 哪条 quote 支撑这条边？
+- 这条边影响了哪个 taxonomy node 或 state transition？
+- 这条边属于哪条 evolution trajectory？
+
+这个视图应该贴近当前 EvoTaxa artifacts：
+
+```text
+taxonomy nodes
+entities
+typed edges
+edge scores
+evidence quotes
+state transitions
+evolution trajectories
+```
+
+它是证据层，应该局部、可检查，并能解释某条 edge 或 trajectory 为什么成立。
+
+#### Macro View
+
+macro view 从 micro evidence 里总结领域层面的规律。它不应该预设所有领域都是周期性的，而是应该在多个候选宏观模式上估计 pattern profile：
+
+```text
+differentiation       # taxonomy 变得更细
+convergence           # 多个分支汇合成共同框架
+hybridization         # 不同分支的方法或机制组合
+recontextualization   # 旧机制迁移到新媒介、制度或技术环境
+recurrence            # 旧 motif 在新条件下回归
+institutionalization  # 临时实践变成正式工具、标准或治理流程
+replacement           # 新机制替代旧机制
+fragmentation         # 领域分裂成多个弱连接方向
+stabilization         # 术语和关系随时间稳定下来
+```
+
+macro layer 应该先结构、后解释。规则或统计 detector 先从 EvoTaxa artifacts 里估计 pattern scores；LLM 可以负责总结解释，但不应该从零决定 pattern。
+
+示例输出：
+
+```json
+{
+  "domain": "computational social science methods",
+  "period": "2015-2026",
+  "dominant_patterns": [
+    {"pattern": "differentiation", "score": 0.86},
+    {"pattern": "hybridization", "score": 0.73},
+    {"pattern": "recontextualization", "score": 0.58},
+    {"pattern": "recurrence", "score": 0.22}
+  ],
+  "interpretation": "The domain is primarily differentiating, with increasing hybridization between text-as-data, causal inference, and LLM-assisted annotation. Recurrence is weak."
+}
+```
+
+#### Pattern Evidence
+
+pattern scores 应该来自已有 artifacts：
+
+```text
+differentiation:
+  taxonomy split rate
+  new child-node rate
+  increasing taxonomy depth
+  trajectory branch factor
+
+hybridization:
+  cross-link rate
+  multi-taxonomy trajectories
+  entities appearing across dimensions
+
+convergence:
+  multiple predecessor branches leading to one node/entity
+  trajectory merging
+  rising shared vocabulary across formerly separate nodes
+
+recontextualization:
+  old relation pattern reused with new actors, media, technology, or institutional setting
+  shared evidence-role structure with changed context terms
+
+recurrence:
+  semantic similarity between old and new motifs
+  large time gap
+  shared roles or evidence slots
+  context shift rather than exact duplication
+
+institutionalization:
+  rising support over time
+  repeated trusted edges
+  stable schema
+  policy, standard, protocol, audit, or governance entity types
+
+fragmentation:
+  high sibling growth
+  low trajectory convergence
+  many branch points with weak shared successors
+
+stabilization:
+  decreasing schema revisions
+  stable relation mix
+  repeated high-confidence edges within the same taxonomy region
+```
+
+#### Visualization
+
+可视化也应该是 two-level：
+
+```text
+Micro View:
+  local taxonomy subtree + selected trajectory + evidence quotes
+
+Macro View:
+  adaptive pattern profile + timeline bands + representative trajectories
+```
+
+这样避免画成一张不可读的全局大图。micro view 是证据显微镜；macro view 是理论层面的规律综合。
+
 ## 15. Implementation Roadmap
 
 ### Phase 1：Taxonomy Upgrade
@@ -1060,3 +1191,26 @@ Goal: build MEG-lite and forecast_hooks.jsonl
 8. 人工审计这些 hooks 是否优于当前 cue-based method evolution assets。
 
 这是证明 EvoTaxa 是真实算法升级，而不是简单 rebranding 的最短路径。
+
+## 20. Deferred TODO：Adaptive Pattern Synthesis Layer
+
+当前 proposal 已经加入 two-level evolution view，但 macro-level pattern synthesis layer 暂时不实现。它应该等 core state 和 trajectory artifacts 在至少一个真实 social-science corpus 上稳定后再做。
+
+计划产物：
+
+```text
+patterns/pattern_profile.json
+patterns/pattern_evidence.jsonl
+patterns/pattern_timeline.jsonl
+```
+
+计划实现：
+
+1. 加入 differentiation、convergence、hybridization、recontextualization、recurrence、institutionalization、replacement、fragmentation、stabilization 等 pattern detectors。
+2. 从已有 EvoTaxa artifacts 计算 pattern scores：taxonomy events、state transitions、trajectories、edge scores、schema revisions、relation rejections。
+3. 为每个 macro pattern 绑定代表性的 micro-level evidence。
+4. 可选使用 LLM 总结 detector-backed evidence，但不能让 LLM 从零生成 pattern profile。
+5. 加入可视化友好的字段：time span、representative nodes、representative trajectories、pattern score、evidence ids、interpretation text。
+6. 加入 tests 和 ablation，对比有无 taxonomy co-evolution、schema adaptation、negative evidence 时 pattern profiles 的变化。
+
+这一层应该保持 optional。不同领域可能主要表现为 differentiation，也可能表现为 recurrence 或 recontextualization。算法应该估计这种差异，而不是把单一演化理论强加给所有语料。

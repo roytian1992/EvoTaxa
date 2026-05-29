@@ -754,6 +754,137 @@ EvoTaxa can be transferred to social science by changing the entity vocabulary.
 - How AI governance evolved from model-risk framing to institutional accountability, auditing, and regulatory design.
 - How education inequality interventions moved from resource access to learning analytics, tutoring, and family/community mechanisms.
 
+### Two-Level Evolution View
+
+Social-science evolution should not be forced into a single visual or analytic form. Some domains behave like scientific-method evolution, where concepts differentiate and the taxonomy becomes increasingly fine-grained. Other domains show recurring motifs, recontextualized problems, institutional cycles, or broad shifts in public framing. EvoTaxa should support both without hard-coding a recurrence narrative.
+
+The recommended design is a two-level view:
+
+```text
+Micro View: evidence-grounded local mechanisms
+Macro View: adaptive pattern synthesis
+```
+
+#### Micro View
+
+The micro view explains local evolution:
+
+- Which entities, concepts, methods, interventions, or measurement tools changed?
+- Which typed relation connects them?
+- Which quote grounds the edge?
+- Which taxonomy node or state transition does the edge affect?
+- Which trajectory does the edge participate in?
+
+This view should stay close to the current EvoTaxa artifacts:
+
+```text
+taxonomy nodes
+entities
+typed edges
+edge scores
+evidence quotes
+state transitions
+evolution trajectories
+```
+
+It is the evidence layer. It should be local, inspectable, and suitable for explaining why a specific edge or trajectory exists.
+
+#### Macro View
+
+The macro view summarizes domain-level regularities from micro-level evidence. It should not assume that every domain is cyclical. Instead, it should estimate a pattern profile over several candidate macro patterns:
+
+```text
+differentiation       # taxonomy becomes more fine-grained
+convergence           # separate branches merge into a common framework
+hybridization         # methods or mechanisms from different branches combine
+recontextualization   # old mechanisms move into new media, institutional, or technical contexts
+recurrence            # an older motif returns under transformed conditions
+institutionalization  # temporary practices become formal tools, standards, or governance routines
+replacement           # a new mechanism displaces an older one
+fragmentation         # a domain splits into multiple weakly connected directions
+stabilization         # terminology and relations become stable over time
+```
+
+The macro layer should be structure-first and explanation-second. Rule-based or statistical detectors should estimate pattern scores from EvoTaxa artifacts; an LLM may summarize the result, but should not decide the pattern from scratch.
+
+Example output:
+
+```json
+{
+  "domain": "computational social science methods",
+  "period": "2015-2026",
+  "dominant_patterns": [
+    {"pattern": "differentiation", "score": 0.86},
+    {"pattern": "hybridization", "score": 0.73},
+    {"pattern": "recontextualization", "score": 0.58},
+    {"pattern": "recurrence", "score": 0.22}
+  ],
+  "interpretation": "The domain is primarily differentiating, with increasing hybridization between text-as-data, causal inference, and LLM-assisted annotation. Recurrence is weak."
+}
+```
+
+#### Pattern Evidence
+
+Pattern scores should be derived from existing artifacts:
+
+```text
+differentiation:
+  taxonomy split rate
+  new child-node rate
+  increasing taxonomy depth
+  trajectory branch factor
+
+hybridization:
+  cross-link rate
+  multi-taxonomy trajectories
+  entities appearing across dimensions
+
+convergence:
+  multiple predecessor branches leading to one node/entity
+  trajectory merging
+  rising shared vocabulary across formerly separate nodes
+
+recontextualization:
+  old relation pattern reused with new actors, media, technology, or institutional setting
+  shared evidence-role structure with changed context terms
+
+recurrence:
+  semantic similarity between old and new motifs
+  large time gap
+  shared roles or evidence slots
+  context shift rather than exact duplication
+
+institutionalization:
+  rising support over time
+  repeated trusted edges
+  stable schema
+  policy, standard, protocol, audit, or governance entity types
+
+fragmentation:
+  high sibling growth
+  low trajectory convergence
+  many branch points with weak shared successors
+
+stabilization:
+  decreasing schema revisions
+  stable relation mix
+  repeated high-confidence edges within the same taxonomy region
+```
+
+#### Visualization
+
+The visualization should also be two-level:
+
+```text
+Micro View:
+  local taxonomy subtree + selected trajectory + evidence quotes
+
+Macro View:
+  adaptive pattern profile + timeline bands + representative trajectories
+```
+
+This avoids drawing one unreadable global graph. The micro view serves as the evidence microscope; the macro view serves as the theory-level synthesis.
+
 ## 15. Implementation Roadmap
 
 ### Phase 1: Taxonomy Upgrade
@@ -1026,3 +1157,26 @@ Minimal deliverable:
 7. Manually audit whether hooks are better than current cue-based method evolution assets.
 
 This is the shortest path to showing that EvoTaxa is a real algorithmic upgrade rather than a rebranding.
+
+## 20. Deferred TODO: Adaptive Pattern Synthesis Layer
+
+This proposal now includes the two-level evolution view, but the macro-level pattern synthesis layer is intentionally deferred. It should be implemented after the core state and trajectory artifacts are stable on at least one real social-science corpus.
+
+Planned artifacts:
+
+```text
+patterns/pattern_profile.json
+patterns/pattern_evidence.jsonl
+patterns/pattern_timeline.jsonl
+```
+
+Planned implementation:
+
+1. Add pattern detectors for differentiation, convergence, hybridization, recontextualization, recurrence, institutionalization, replacement, fragmentation, and stabilization.
+2. Compute pattern scores from existing EvoTaxa artifacts: taxonomy events, state transitions, trajectories, edge scores, schema revisions, and relation rejections.
+3. Attach representative micro-level evidence to each macro pattern.
+4. Optionally use an LLM only to summarize detector-backed evidence, not to invent the pattern profile.
+5. Add visualization-ready fields for micro and macro views: time span, representative nodes, representative trajectories, pattern score, evidence ids, and interpretation text.
+6. Add tests and an ablation comparing pattern profiles with and without taxonomy co-evolution, schema adaptation, and negative evidence.
+
+This layer should remain optional. Some domains may be dominated by differentiation, while others may show recurrence or recontextualization. The algorithm should estimate that difference rather than forcing one theory of change onto every corpus.
