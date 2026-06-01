@@ -324,6 +324,7 @@ Each run writes:
     evolution_insight_report.agent.md
     evolution_insight_report.agent.summary.json
     evolution_insight_report.evidence_pack.json
+    evolution_insight_report.reader_evidence_pack.json
     evolution_insight_report.agent_trace.json
   state/
     evolution_state.json
@@ -436,7 +437,7 @@ Optional LLM summaries can be added later only as summaries of detector-backed e
 - `reports/evolution_insight_report.md`
 - `reports/evolution_insight_report.summary.json`
 
-That deterministic file is meant as the audit substrate, not the final story. For a more readable research report, use `scripts/write_agentic_evolution_report.py`. It builds an evidence pack and then runs a multi-step writing agent:
+That deterministic file is meant as the audit substrate, not the final story. For a more readable research report, use `scripts/write_agentic_evolution_report.py`. It builds two evidence packs and then runs a multi-step writing agent. The raw evidence pack preserves machine IDs for audit; the reader evidence pack maps them to readable labels such as `E1`, `P2.1`, and `T1` so the final report does not expose implementation details.
 
 1. `scout`: identify candidate story lines and weak claims.
 2. `outline`: choose a narrative structure.
@@ -449,6 +450,7 @@ The agentic report writes:
 - `reports/evolution_insight_report.agent.md`
 - `reports/evolution_insight_report.agent.summary.json`
 - `reports/evolution_insight_report.evidence_pack.json`
+- `reports/evolution_insight_report.reader_evidence_pack.json`
 - `reports/evolution_insight_report.agent_trace.json`
 
 Example local `config.yaml`:
@@ -467,7 +469,7 @@ llm:
       enable_thinking: false
 ```
 
-The report agent does not invent macro patterns, edges, trajectories, nodes, quotes, or years. It can only turn the evidence pack into a clearer argument and must preserve caveats for weak evidence.
+The report agent does not invent macro patterns, edges, trajectories, nodes, quotes, or years. It can only turn the evidence pack into a clearer argument and must preserve caveats for weak evidence. Final prose should use reader-facing evidence labels and node names, not raw pipeline IDs.
 
 ## Taxonomy-Graph Co-Evolution
 

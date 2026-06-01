@@ -1053,6 +1053,7 @@ PYTHONPATH=src python -m evotaxa.cli run-full --config configs/social_science.ex
   - Added `scripts/write_agentic_evolution_report.py`.
   - Added report prompts under `task_specs/prompts/reports/` for a five-step writing agent: `scout`, `outline`, `draft`, `critic`, and `revise`.
   - The agent first builds `reports/evolution_insight_report.evidence_pack.json` from macro profiles, accepted successor edges, trajectories, cards, and document metadata.
+  - It also builds `reports/evolution_insight_report.reader_evidence_pack.json`, which maps raw machine IDs to reader-facing evidence labels such as E1, P2.1, and T1 before prompts are sent to the model.
   - It then writes `reports/evolution_insight_report.agent.md`, `reports/evolution_insight_report.agent.summary.json`, and `reports/evolution_insight_report.agent_trace.json`.
   - `scripts/build_evolution_insight_report.py` now avoids importing the full `evotaxa` package so the deterministic evidence appendix can run in a minimal Python environment without `PyYAML`.
   - `.gitignore` now excludes local `config.yaml` files; the generated local config uses `api_key_env` and does not store literal API keys in tracked files.
@@ -1077,13 +1078,14 @@ PYTHONPATH=src python -m evotaxa.cli run-full --config configs/social_science.ex
   - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent.md`
   - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent.summary.json`
   - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.evidence_pack.json`
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.reader_evidence_pack.json`
   - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent_trace.json`
 - Verified facts:
   - The final run used `Qwen3-235B-FP8` at `http://127.0.0.1:8001/v1` with `enable_thinking=false` through `chat_template_kwargs`.
   - Agent trace completed all five steps: scout, outline, draft, critic, and revise.
-  - Final report length is 4,644 characters / 87 lines.
-  - The final report has no emoji-like decoration and all extracted edge anchors in the report resolve to accepted successor edges.
-  - The report is now organized around interpretable claims: LLM substitution discourse, evaluation-protocol institutionalization, cross-context adaptation, limits of paradigm-shift claims, and next audit actions.
+  - Final report length after reader-evidence rewrite is 5,859 characters / 105 lines.
+  - The final report has no emoji-like decoration, no raw successor edge IDs, no pattern IDs, no trajectory IDs, and no double-underscore machine strings in the prose.
+  - The report is now organized around interpretable claims: LLM substitution discourse, evaluation-protocol institutionalization, cross-context adaptation, method/modeling hybridization, limits of paradigm-shift claims, and next audit actions.
 - Environment caveat:
   - The active system Python lacks `pytest`, `PyYAML`, `json_repair`, and `pip`; script-level `py_compile`, dry-run generation, and live Qwen report generation were verified in this minimal environment.
 - Current state:

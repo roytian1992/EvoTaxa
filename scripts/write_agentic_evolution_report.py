@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -39,7 +40,8 @@ from build_evolution_insight_report import (  # noqa: E402
 
 DEFAULT_SYSTEM_PROMPT = """你是一名严谨但有叙事能力的计算社会科学研究报告写作者。
 你必须只使用用户提供的证据包写作，不能编造文献、节点、年份、趋势或因果关系。
-你的任务不是复述统计表，而是提出有洞察的研究判断，并把每个判断锚定到证据 id、节点、关系、时间或引文。
+你的任务不是复述统计表，而是提出有洞察的研究判断，并把每个判断锚定到读者可理解的证据标签、节点、关系、时间或引文。
+最终报告面向研究合作者，不要暴露内部字段名、机器编号、下划线连接的机器串、运行路径或其他工程管线痕迹。
 请直接输出中文 Markdown，不要输出思考过程。
 """
 
@@ -50,6 +52,12 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=Path("config.yaml"), help="Local YAML/JSON config for OpenAI-compatible API.")
     parser.add_argument("--output", type=Path, default=None, help="Defaults to <run-root>/reports/evolution_insight_report.agent.md.")
     parser.add_argument("--evidence-output", type=Path, default=None, help="Defaults to <run-root>/reports/evolution_insight_report.evidence_pack.json.")
+    parser.add_argument(
+        "--reader-evidence-output",
+        type=Path,
+        default=None,
+        help="Reader-facing evidence pack used by the writing agent. Defaults to <run-root>/reports/evolution_insight_report.reader_evidence_pack.json.",
+    )
     parser.add_argument("--trace-output", type=Path, default=None, help="Defaults to <run-root>/reports/evolution_insight_report.agent_trace.json.")
     parser.add_argument("--deterministic-output", type=Path, default=None, help="Defaults to <run-root>/reports/evolution_insight_report.md.")
     parser.add_argument("--max-patterns", type=int, default=9)
@@ -64,8 +72,18 @@ def main() -> int:
     run_root = args.run_root.expanduser().resolve()
     output = args.output.expanduser().resolve() if args.output else run_root / "reports" / "evolution_insight_report.agent.md"
     default_evidence_name = "evolution_insight_report.dry_run.evidence_pack.json" if args.dry_run else "evolution_insight_report.evidence_pack.json"
+    default_reader_evidence_name = (
+        "evolution_insight_report.dry_run.reader_evidence_pack.json"
+        if args.dry_run
+        else "evolution_insight_report.reader_evidence_pack.json"
+    )
     default_trace_name = "evolution_insight_report.dry_run.agent_trace.json" if args.dry_run else "evolution_insight_report.agent_trace.json"
     evidence_output = args.evidence_output.expanduser().resolve() if args.evidence_output else run_root / "reports" / default_evidence_name
+    reader_evidence_output = (
+        args.reader_evidence_output.expanduser().resolve()
+        if args.reader_evidence_output
+        else run_root / "reports" / default_reader_evidence_name
+    )
     trace_output = args.trace_output.expanduser().resolve() if args.trace_output else run_root / "reports" / default_trace_name
     deterministic_output = (
         args.deterministic_output.expanduser().resolve()
@@ -94,6 +112,8 @@ def main() -> int:
         quote_chars=max(80, args.quote_chars),
     )
     write_json(evidence_output, evidence_pack)
+    reader_evidence_pack = build_reader_evidence_pack(evidence_pack)
+    write_json(reader_evidence_output, reader_evidence_pack)
 
     trace: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -101,18 +121,30 @@ def main() -> int:
         "style": args.style,
         "dry_run": bool(args.dry_run),
         "evidence_output": str(evidence_output),
+        "reader_evidence_output": str(reader_evidence_output),
         "deterministic_output": str(deterministic_output),
         "steps": [],
     }
     if args.dry_run:
-        trace["planned_prompts"] = build_planned_prompts(evidence_pack=evidence_pack, style=args.style)
+        trace["planned_prompts"] = build_planned_prompts(evidence_pack=reader_evidence_pack, style=args.style)
         write_json(trace_output, trace)
-        print(json.dumps({"evidence": str(evidence_output), "trace": str(trace_output), "dry_run": True}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "evidence": str(evidence_output),
+                    "reader_evidence": str(reader_evidence_output),
+                    "trace": str(trace_output),
+                    "dry_run": True,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
     config = load_local_config(args.config)
     client = OpenAICompatTextClient(config)
-    report_markdown = run_writing_agent(client=client, evidence_pack=evidence_pack, style=args.style, trace=trace)
+    report_markdown = run_writing_agent(client=client, evidence_pack=reader_evidence_pack, style=args.style, trace=trace)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report_markdown, encoding="utf-8")
     summary_path = output.with_suffix(".summary.json")
@@ -122,6 +154,7 @@ def main() -> int:
             **deterministic["summary"],
             "agentic_report": str(output),
             "evidence_pack": str(evidence_output),
+            "reader_evidence_pack": str(reader_evidence_output),
             "agent_trace": str(trace_output),
             "llm_model": client.model,
             "llm_base_url": client.base_url,
@@ -132,13 +165,14 @@ def main() -> int:
     write_json(trace_output, trace)
     if not args.no_manifest_update:
         update_manifest(run_root, deterministic_output, deterministic_summary_path, deterministic["summary"])
-        update_agent_manifest(run_root, output, summary_path, evidence_output, trace_output)
+        update_agent_manifest(run_root, output, summary_path, evidence_output, reader_evidence_output, trace_output)
     print(
         json.dumps(
             {
                 "report": str(output),
                 "summary": str(summary_path),
                 "evidence": str(evidence_output),
+                "reader_evidence": str(reader_evidence_output),
                 "trace": str(trace_output),
                 "model": client.model,
                 "steps": len(trace["steps"]),
@@ -301,6 +335,127 @@ def trajectory_pack(row: dict[str, Any], edge_by_id: dict[str, dict[str, Any]], 
     }
 
 
+def build_reader_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    edge_labels: dict[str, str] = {}
+    trajectory_labels: dict[str, str] = {}
+
+    def label_edge(edge: dict[str, Any]) -> dict[str, Any]:
+        raw_id = str(edge.get("edge_id") or "")
+        if raw_id:
+            edge_labels.setdefault(raw_id, f"E{len(edge_labels) + 1}")
+        label = edge_labels.get(raw_id, f"E{len(edge_labels) + 1}")
+        return {
+            "evidence_label": label,
+            "relation": relation_label(edge.get("relation")),
+            "source": edge.get("source"),
+            "target": edge.get("target"),
+            "source_role": role_label(edge.get("source_type")),
+            "target_role": role_label(edge.get("target_type")),
+            "year": edge.get("target_year") or edge.get("source_year"),
+            "time_gap_years": gap_years(edge.get("time_delta_days")),
+            "paper_title": edge.get("target_title") or edge.get("source_title"),
+            "quote": edge.get("quote"),
+        }
+
+    def label_trajectory(row: dict[str, Any]) -> dict[str, Any]:
+        raw_id = str(row.get("trajectory_id") or "")
+        if raw_id:
+            trajectory_labels.setdefault(raw_id, f"T{len(trajectory_labels) + 1}")
+        label = trajectory_labels.get(raw_id, f"T{len(trajectory_labels) + 1}")
+        return {
+            "trajectory_label": label,
+            "path": row.get("path") or [],
+            "relations": [relation_label(item) for item in row.get("relations") or []],
+            "path_length": row.get("path_length"),
+        }
+
+    patterns = []
+    for index, pattern in enumerate(evidence_pack.get("macro_patterns") or [], start=1):
+        evidence_rows = []
+        for row in pattern.get("representative_evidence") or []:
+            evidence_rows.append(
+                {
+                    "evidence_label": f"P{index}.{len(evidence_rows) + 1}",
+                    "path": row.get("path"),
+                    "relation": relation_label(row.get("relation")),
+                    "time_slice": row.get("time_slice"),
+                    "edges": [label_edge(edge) for edge in row.get("edges") or []],
+                    "trajectories": [label_trajectory(item) for item in row.get("trajectories") or []],
+                }
+            )
+        patterns.append(
+            {
+                "pattern_label": pattern_title(pattern.get("label") or pattern.get("pattern_id")),
+                "short_name": pattern_short_name(pattern.get("pattern_id") or pattern.get("label")),
+                "score": pattern.get("score"),
+                "time_span": pattern.get("time_span"),
+                "detector_interpretation": pattern.get("detector_insight"),
+                "caveat": pattern.get("interpretation_caveat"),
+                "dominant_relations": [
+                    {"relation": relation_label(row.get("value")), "count": row.get("count"), "share": row.get("share")}
+                    for row in pattern.get("dominant_relations") or []
+                ],
+                "dominant_type_transitions": [
+                    {
+                        "transition": readable_transition(row.get("value")),
+                        "count": row.get("count"),
+                        "share": row.get("share"),
+                    }
+                    for row in pattern.get("dominant_type_transitions") or []
+                ],
+                "temporal_hotspots": pattern.get("temporal_hotspots") or [],
+                "representative_evidence": evidence_rows,
+            }
+        )
+
+    micro = evidence_pack.get("micro_evidence") or {}
+    reader_pack = {
+        "writing_contract": {
+            "audience": "research collaborators in computational social science",
+            "style": "insightful research memo, not an engineering audit log",
+            "must_do": [
+                "Use natural-language evidence labels such as E1, P2.1, or T1.",
+                "Use node names and paper titles when explaining evidence.",
+                "Keep raw machine identifiers out of the final report body.",
+                "Put uncertainty and audit needs in reader-friendly language.",
+            ],
+            "must_not_do": [
+                "Do not mention internal field names, machine identifiers, JSON fields, run paths, evidence-group field names, or raw ids with double underscores.",
+                "Do not use machine strings from the pipeline; cite reader-facing labels and node names instead.",
+                "Do not turn the report into tables of counts.",
+            ],
+        },
+        "run_context": {
+            "project": (evidence_pack.get("run") or {}).get("project"),
+            "documents": (evidence_pack.get("run") or {}).get("documents"),
+            "strict_successor_edges": (evidence_pack.get("run") or {}).get("strict_successor_edges"),
+            "successor_trajectories": (evidence_pack.get("run") or {}).get("successor_trajectories"),
+            "macro_patterns": (evidence_pack.get("run") or {}).get("macro_patterns"),
+        },
+        "macro_patterns": patterns,
+        "micro_evidence": {
+            "relation_mix": [
+                {"relation": relation_label(row.get("value")), "count": row.get("count"), "share": row.get("share")}
+                for row in micro.get("top_relation_types") or []
+            ],
+            "type_transitions": [
+                {"transition": readable_transition(row.get("value")), "count": row.get("count"), "share": row.get("share")}
+                for row in micro.get("top_type_transitions") or []
+            ],
+            "active_years": micro.get("top_target_years") or [],
+            "replacement_examples": [label_edge(edge) for edge in micro.get("replacement_edges") or []],
+            "cross_role_examples": [label_edge(edge) for edge in micro.get("cross_type_edges") or []],
+            "long_gap_examples": [label_edge(edge) for edge in micro.get("long_gap_edges") or []],
+            "trajectory_examples": [label_trajectory(row) for row in micro.get("representative_trajectories") or []],
+        },
+        "audit_crosswalk": {
+            "edge_labels": edge_labels,
+            "trajectory_labels": trajectory_labels,
+        },
+    }
+    return reader_pack
+
+
 def run_writing_agent(
     *,
     client: "OpenAICompatTextClient",
@@ -308,6 +463,7 @@ def run_writing_agent(
     style: str,
     trace: dict[str, Any],
 ) -> str:
+    prompt_pack = prompt_evidence_pack(evidence_pack)
     scout = call_agent_step(
         client,
         trace,
@@ -316,7 +472,7 @@ def run_writing_agent(
             "agentic_report_scout",
             {
                 "style": style,
-                "evidence_pack": compact_json(evidence_pack, 42000),
+                "evidence_pack": compact_json(prompt_pack, 42000),
             },
         ),
         max_chars=8000,
@@ -329,7 +485,7 @@ def run_writing_agent(
             "agentic_report_outline",
             {
                 "style": style,
-                "evidence_pack": compact_json(evidence_pack, 36000),
+                "evidence_pack": compact_json(prompt_pack, 36000),
                 "scout_notes": scout,
             },
         ),
@@ -343,7 +499,7 @@ def run_writing_agent(
             "agentic_report_draft",
             {
                 "style": style,
-                "evidence_pack": compact_json(evidence_pack, 52000),
+                "evidence_pack": compact_json(prompt_pack, 52000),
                 "scout_notes": scout,
                 "outline": outline,
             },
@@ -357,7 +513,7 @@ def run_writing_agent(
         prompt=render_prompt(
             "agentic_report_critic",
             {
-                "evidence_pack": compact_json(evidence_pack, 42000),
+                "evidence_pack": compact_json(prompt_pack, 42000),
                 "draft": draft,
             },
         ),
@@ -371,14 +527,45 @@ def run_writing_agent(
             "agentic_report_revise",
             {
                 "style": style,
-                "evidence_pack": compact_json(evidence_pack, 46000),
+                "evidence_pack": compact_json(prompt_pack, 46000),
                 "draft": draft,
                 "critique": critique,
             },
         ),
         max_chars=36000,
     )
-    return final.strip() + "\n"
+    return sanitize_final_report(final, evidence_pack).strip() + "\n"
+
+
+def sanitize_final_report(text: str, evidence_pack: dict[str, Any]) -> str:
+    crosswalk = evidence_pack.get("audit_crosswalk") if isinstance(evidence_pack.get("audit_crosswalk"), dict) else {}
+    edge_labels = crosswalk.get("edge_labels") if isinstance(crosswalk.get("edge_labels"), dict) else {}
+    trajectory_labels = crosswalk.get("trajectory_labels") if isinstance(crosswalk.get("trajectory_labels"), dict) else {}
+    cleaned = str(text or "")
+    for raw_id, label in sorted(edge_labels.items(), key=lambda item: len(str(item[0])), reverse=True):
+        cleaned = cleaned.replace(str(raw_id), f"证据 {label}")
+    for raw_id, label in sorted(trajectory_labels.items(), key=lambda item: len(str(item[0])), reverse=True):
+        cleaned = cleaned.replace(str(raw_id), f"轨迹 {label}")
+    replacements = {
+        "pattern_id: ": "",
+        "pattern_id": "模式",
+        "edge_id": "证据编号",
+        "trajectory_id": "轨迹编号",
+        "schema_group": "证据分组",
+        "successor edge": "演化证据",
+        "successor Edge": "演化证据",
+        "successor trajectory": "演化轨迹",
+    }
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new)
+    cleaned = re.sub(r"`?[\w]+(?:__[\w]+)+__w\d+`?", "证据", cleaned)
+    cleaned = re.sub(r"\bw\d{8,}\b", "对应文献", cleaned)
+    cleaned = re.sub(r"\b(pattern_id|edge_id|trajectory_id|schema_group)\b[:：]?\s*", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def prompt_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in evidence_pack.items() if key != "audit_crosswalk"}
 
 
 def call_agent_step(client: "OpenAICompatTextClient", trace: dict[str, Any], *, step: str, prompt: str, max_chars: int) -> str:
@@ -401,7 +588,7 @@ def call_agent_step(client: "OpenAICompatTextClient", trace: dict[str, Any], *, 
 
 
 def build_planned_prompts(*, evidence_pack: dict[str, Any], style: str) -> dict[str, str]:
-    evidence = compact_json(evidence_pack, 12000)
+    evidence = compact_json(prompt_evidence_pack(evidence_pack), 12000)
     return {
         "scout": render_prompt("agentic_report_scout", {"style": style, "evidence_pack": evidence}),
         "outline": render_prompt("agentic_report_outline", {"style": style, "evidence_pack": evidence, "scout_notes": "<scout_notes>"}),
@@ -560,7 +747,95 @@ def edge_rank(edge: dict[str, Any]) -> tuple[float, int, str]:
     )
 
 
-def update_agent_manifest(run_root: Path, output: Path, summary_path: Path, evidence_output: Path, trace_output: Path) -> None:
+def pattern_title(value: Any) -> str:
+    key = str(value or "").strip().lower()
+    labels = {
+        "substitution": "替代模式",
+        "institutionalization": "制度化模式",
+        "recontextualization": "重新语境化模式",
+        "hybridization": "混合化模式",
+        "differentiation": "分化模式",
+        "convergence": "汇聚模式",
+        "cyclical_return": "循环回归模式",
+        "stabilization": "稳定化模式",
+        "fragmentation": "碎片化模式",
+    }
+    if key in labels:
+        return labels[key]
+    return str(value or "").replace("_", " ").strip().title()
+
+
+def pattern_short_name(value: Any) -> str:
+    key = str(value or "").strip().lower()
+    labels = {
+        "substitution": "替代",
+        "institutionalization": "制度化",
+        "recontextualization": "重新语境化",
+        "hybridization": "混合化",
+        "differentiation": "分化",
+        "convergence": "汇聚",
+        "cyclical_return": "循环回归",
+        "stabilization": "稳定化",
+        "fragmentation": "碎片化",
+    }
+    return labels.get(key, str(value or "").replace("_", " "))
+
+
+def relation_label(value: Any) -> str:
+    labels = {
+        "replaces": "替代",
+        "extends": "扩展",
+        "adapts": "语境适配",
+        "improves": "改进",
+        "generalizes": "泛化",
+        "specializes": "专门化",
+    }
+    return labels.get(str(value or ""), str(value or "").replace("_", " "))
+
+
+def role_label(value: Any) -> str:
+    labels = {
+        "method": "方法",
+        "measurement_strategy": "测量策略",
+        "modeling_strategy": "建模策略",
+        "evaluation_protocol": "评估协议",
+        "infrastructure_tooling": "基础设施/工具",
+        "data_source": "数据来源",
+        "governance_practice": "治理实践",
+    }
+    return labels.get(str(value or ""), str(value or "").replace("_", " "))
+
+
+def readable_transition(value: Any) -> str:
+    text = str(value or "")
+    for key in [
+        "measurement_strategy",
+        "modeling_strategy",
+        "evaluation_protocol",
+        "infrastructure_tooling",
+        "data_source",
+        "governance_practice",
+        "method",
+    ]:
+        text = text.replace(key, role_label(key))
+    return text.replace("->", "→")
+
+
+def gap_years(value: Any) -> float | None:
+    days = safe_float(value)
+    if days <= 0:
+        return None
+    return round(days / 365.25, 1)
+
+
+def update_agent_manifest(
+    run_root: Path,
+    output: Path,
+    summary_path: Path,
+    evidence_output: Path,
+    reader_evidence_output: Path,
+    trace_output: Path,
+) -> None:
     manifest_path = run_root / "manifest.json"
     if not manifest_path.exists():
         return
@@ -571,6 +846,7 @@ def update_agent_manifest(run_root: Path, output: Path, summary_path: Path, evid
     layout["agentic_evolution_insight_report"] = relative_path(output, run_root)
     layout["agentic_evolution_insight_report_summary"] = relative_path(summary_path, run_root)
     layout["agentic_evolution_insight_evidence_pack"] = relative_path(evidence_output, run_root)
+    layout["agentic_evolution_insight_reader_evidence_pack"] = relative_path(reader_evidence_output, run_root)
     layout["agentic_evolution_insight_trace"] = relative_path(trace_output, run_root)
     counts = manifest.setdefault("counts", {})
     counts["agentic_evolution_insight_reports"] = 1

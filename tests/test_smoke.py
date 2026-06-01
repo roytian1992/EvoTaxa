@@ -33,7 +33,7 @@ from extract_successor_edges import build_successor_candidates  # noqa: E402
 from materialize_evolution_artifacts import build_successor_trajectories, is_successor_edge  # noqa: E402
 from filter_successor_edges import strict_rejection_reason  # noqa: E402
 from build_evolution_insight_report import build_evolution_insight_report  # noqa: E402
-from write_agentic_evolution_report import build_evidence_pack, build_planned_prompts, parse_minimal_mapping  # noqa: E402
+from write_agentic_evolution_report import build_evidence_pack, build_planned_prompts, build_reader_evidence_pack, parse_minimal_mapping, prompt_evidence_pack, sanitize_final_report  # noqa: E402
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -1424,12 +1424,23 @@ def test_agentic_evolution_report_builds_evidence_pack_and_prompts(tmp_path: Pat
         max_micro_examples=3,
         quote_chars=180,
     )
-    prompts = build_planned_prompts(evidence_pack=pack, style="research_memo")
+    reader_pack = build_reader_evidence_pack(pack)
+    prompts = build_planned_prompts(evidence_pack=reader_pack, style="research_memo")
     assert pack["macro_patterns"][0]["pattern_id"] == "substitution"
     assert pack["micro_evidence"]["replacement_edges"][0]["edge_id"] == edge_id
+    assert reader_pack["macro_patterns"][0]["pattern_label"] == "替代模式"
+    assert reader_pack["micro_evidence"]["replacement_examples"][0]["evidence_label"] == "E1"
+    assert reader_pack["audit_crosswalk"]["edge_labels"][edge_id] == "E1"
     assert "zero-shot annotation reduces the need for manual coding" in json.dumps(pack, ensure_ascii=False)
+    prompt_pack_text = json.dumps(prompt_evidence_pack(reader_pack), ensure_ascii=False)
+    assert edge_id not in prompt_pack_text
+    assert "pattern_id" not in prompt_pack_text
     assert "不要堆统计表" in prompts["scout"]
     assert "最终中文 Markdown" in prompts["revise"]
+    assert "pattern_id" not in prompts["revise"]
+    cleaned = sanitize_final_report(f"请审计 {edge_id} 和 pattern_id。", reader_pack)
+    assert edge_id not in cleaned
+    assert "证据 E1" in cleaned
 
 
 def test_agentic_report_minimal_yaml_config_parser() -> None:
