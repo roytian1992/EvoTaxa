@@ -1,0 +1,31 @@
+id: relation_extraction_batch
+category: llm
+name: Relation Extraction Batch
+description: Decide whether candidate entity pairs express schema-guided evolution relations.
+task_variables:
+  - name: relation_schema
+    required: true
+  - name: evidence_schema
+    required: true
+  - name: pairs
+    required: true
+static_variables: []
+template: |
+  Decide whether each source-target entity pair expresses a taxonomy-guided evolution relation.
+  Use the relation schema as the closed set of allowed edge types. Prefer background or accept=false for weak co-mentions.
+  Candidate metadata contains retrieval evidence only; it is not enough by itself for acceptance.
+  Accept only when the provided source or target text quote-groundedly supports a concrete mechanism, adaptation, validation, comparison, component use, replacement, improvement, enablement, operationalization, or combination between the two named entities.
+  For rejected pairs, provide a rejection_reason from: weak_co_mention, comparison_only, temporal_violation, no_mechanism_evidence, schema_mismatch, unsupported_by_quotes.
+  If accepted, return quote-grounded evidence for the selected relation's evidence slots. Every quote must be copied exactly from source or target text.
+  Evidence values must be objects, not strings: {"description": "...", "quote": "exact copied span"}.
+
+  Allowed relation schema:
+  {relation_schema}
+
+  Evidence schema:
+  {evidence_schema}
+
+  Pairs:
+  {pairs}
+
+  Return JSON: {"relations": [{"pair_index": 0, "accept": false, "edge_type": "background", "confidence": 0.0, "evidence": {"mechanism": {"description": "", "quote": ""}}, "rationale": "", "negative_rationale": "", "rejection_reason": "weak_co_mention"}]}.

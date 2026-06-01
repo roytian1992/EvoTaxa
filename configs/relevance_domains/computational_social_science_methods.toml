@@ -1,0 +1,12 @@
+[screening]
+domain_id = "computational_social_science_methods"
+decision_labels = ["core", "peripheral", "exclude"]
+default_decision = "peripheral"
+
+domain_definition = "Computational social science methods: research about computational methods, data practices, measurement strategies, modeling, simulation, network/text analysis, automated annotation, LLM/synthetic respondent methods, reproducibility, data access, benchmarks, or governance of computational methods used to study social, political, communication, behavioral, institutional, platform, or public phenomena. Applied social-science studies are in scope when the title or abstract explicitly describes computational method/data practice strongly enough to support evolution modeling."
+
+core_criteria = ["The paper provides usable evidence about a computational social science method, data source, measurement strategy, model, simulation, annotation workflow, evaluation protocol, benchmark, reproducibility practice, or data/method governance issue.", "The method or data practice is used for social, political, communication, behavioral, institutional, civic, platform, public-opinion, misinformation, policy, population, or related social-science phenomena.", "Applied studies can be core when the title or abstract explicitly names or describes computational methods/data practices and those signals are central enough to support entity extraction, trajectory construction, or method evolution modeling."]
+
+peripheral_criteria = ["The paper is an applied health, education, humanities, psychiatry, public-policy, or other domain study that uses computational or data methods, but the computational-social-science method/data signal is secondary, routine, or not well described in the title/abstract.", "The paper is conceptually adjacent to AI/social science but has weak evidence about computational social science methods.", "The paper may contain useful method mentions but should be separable from core evidence."]
+
+exclude_criteria = ["The paper is not meaningfully about computational social science methods or computationally mediated social-science evidence.", "The method/data/text/social terms are generic or incidental.", "The paper is mainly biomedical, clinical, literary, arts, engineering, or domain-specific without transferable CSS method signal."]

@@ -1,0 +1,70 @@
+id: successor_edge_batch
+category: llm
+name: Successor Edge Batch
+description: Decide whether older same-schema-group entities are predecessors of newer same-schema-group entities.
+task_variables:
+  - name: pairs
+    required: true
+  - name: allowed_relation_types
+    required: true
+static_variables: []
+template: |
+  You are judging evolution edges for a scholarly methods-evolution graph.
+
+  Each candidate is already constrained so that:
+  - source_entity and target_entity have the same schema_group or candidate evolution scope;
+  - source_entity appears earlier than target_entity;
+  - they share taxonomy context or retrieval evidence.
+  The original source_entity_type and target_entity_type may differ when the schema group deliberately merges sparse or adjacent types.
+
+  Your task is to decide whether the older source should point to the newer target as a real successor relation.
+  Do not accept a pair just because both entities are in the same broad topic or appear in chronological order.
+  Use source_entity_type and target_entity_type as audit context: a cross-type pair is acceptable only when it still describes a real evolution step, for example a measurement strategy becoming a named analytic method, or a method being adapted into a modeling strategy.
+
+  Accept only if the source and target can be read as a defensible methods-evolution step:
+  - target extends, improves, adapts, replaces, specializes, generalizes, recontextualizes, or operationally builds on the source; or
+  - target solves a similar methodological problem with a clearly newer formulation; or
+  - target paper explicitly frames the target as building on, moving beyond, adapting, benchmarking against, or improving the source or the source family.
+  The target must be more than a renamed, more verbose, or merely domain-applied label for the source.
+
+  Rejection rules:
+  - Reject broad field labels and generic terms as predecessors.
+  - Reject if source and target are merely co-topical.
+  - Reject if the target is a genuinely new concept or newly named practice and no predecessor is supported.
+  - Reject if the pair is only a synonym, abbreviation expansion, spelling variant, or generic label variant.
+  - Reject if the target merely uses the source as a component, feature, baseline, or input without transforming it into a successor method/practice.
+  - Reject if the target is only an application domain, paper topic, population, place, or data content rather than a method/practice successor.
+  - Reject if the direction should be reversed.
+  - Reject if the evidence is too weak to explain why the older entity should point to the newer one.
+
+  Evidence rules:
+  - Quotes must be exact copied spans from source_text or target_text.
+  - At least one accepted edge should include a mechanism quote, preferably from the target text.
+  - It is acceptable that the target text does not literally name the source, but the rationale must explain the lineage from quoted evidence.
+
+  Allowed relation types:
+  {allowed_relation_types}
+
+  Candidate pairs:
+  {pairs}
+
+  Return JSON:
+  {
+    "edges": [
+      {
+        "pair_index": 0,
+        "accept": false,
+        "relation_type": "background",
+        "confidence": 0.0,
+        "evidence": {
+          "mechanism": {"description": "", "quote": "", "quote_source": "target"},
+          "methodological_problem": {"description": "", "quote": "", "quote_source": "source"},
+          "tradeoff": {"description": "", "quote": "", "quote_source": "target"}
+        },
+        "rationale": "",
+        "rejection_reason": "co_topic_only"
+      }
+    ]
+  }
+
+  Recommended rejection_reason values: co_topic_only, new_concept_no_predecessor, generic_predecessor, synonym_or_label_variant, component_only, direction_reversed, weak_evidence, not_method_successor.

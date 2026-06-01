@@ -1,0 +1,21 @@
+id: schema_revision_judge
+category: llm
+name: Schema Revision Judge
+description: Judge whether a schema revision candidate should be promoted.
+task_variables:
+  - name: current_schema
+    required: true
+  - name: candidate
+    required: true
+static_variables: []
+template: |
+  Judge this schema revision candidate for taxonomy-guided evolution modeling.
+  Assess whether it is necessary, non-duplicative, and unlikely to harm cross-run comparability.
+
+  Current schema:
+  {current_schema}
+
+  Candidate:
+  {candidate}
+
+  Return JSON with decision, confidence, rationale, and risk. decision must be promote, reject, or needs_human_review.

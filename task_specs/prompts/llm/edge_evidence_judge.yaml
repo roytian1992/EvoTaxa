@@ -1,0 +1,42 @@
+id: edge_evidence_judge
+category: llm
+name: Edge Evidence Judge
+description: Audit an evolution edge against relation and evidence schemas.
+task_variables:
+  - name: relation_schema
+    required: true
+  - name: evidence_schema
+    required: true
+  - name: evidence_slots
+    required: true
+  - name: edge
+    required: true
+  - name: source_text
+    required: true
+  - name: target_text
+    required: true
+static_variables: []
+template: |
+  Audit this evolution edge using the allowed relation and evidence schemas.
+  Return only evidence slots requested below. Do not invent quotes.
+  Every evidence quote must be an exact copied span from the source or target text; leave quote empty if unsupported.
+
+  Allowed relation schema:
+  {relation_schema}
+
+  Evidence schema:
+  {evidence_schema}
+
+  Required evidence slots for this edge:
+  {evidence_slots}
+
+  Edge JSON:
+  {edge}
+
+  Source text:
+  {source_text}
+
+  Target text:
+  {target_text}
+
+  Return JSON with edge_type, confidence, evidence, and rationale. edge_type must be one of the allowed schema keys. evidence must be an object keyed by the required evidence slots; each slot object must include description and quote.

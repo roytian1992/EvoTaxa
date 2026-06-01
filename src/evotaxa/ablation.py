@@ -9,7 +9,15 @@ from evotaxa.io import write_json, write_jsonl
 from evotaxa.pipeline import run_full, run_lite
 
 
-DEFAULT_ABLATION_VARIANTS = ["default", "no_coevolution", "no_expansion", "no_edge_judge", "no_llm"]
+DEFAULT_ABLATION_VARIANTS = [
+    "default",
+    "no_coevolution",
+    "no_schema_adaptation",
+    "no_negative_evidence",
+    "no_expansion",
+    "no_edge_judge",
+    "no_llm",
+]
 
 
 def run_ablation_suite(
@@ -56,6 +64,16 @@ def _variant_config(base_config: EvoTaxaConfig, variant: str, suite_root: Path) 
         config.taxonomy.coevolution_enabled = False
         config.taxonomy.max_coevolution_iterations = 0
         return config
+    if variant == "no_schema_adaptation":
+        config.schema.entity_schema_mode = "fixed"
+        config.schema.relation_schema_mode = "fixed"
+        config.schema.evidence_schema_mode = "fixed"
+        config.graph.relation_schema_mode = "fixed"
+        config.schema.max_schema_revisions = 0
+        return config
+    if variant == "no_negative_evidence":
+        config.macro_patterns.use_negative_evidence = False
+        return config
     if variant == "no_expansion":
         config.taxonomy.expansion_enabled = False
         config.taxonomy.coevolution_enabled = False
@@ -84,8 +102,12 @@ def _summary_row(variant: str, manifest: dict[str, Any]) -> dict[str, Any]:
         "candidate_edges": counts.get("candidate_edges", 0),
         "unverified_edges": counts.get("unverified_edges", 0),
         "forecast_hooks": counts.get("forecast_hooks", 0),
+        "macro_patterns": counts.get("macro_patterns", 0),
+        "macro_pattern_evidence": counts.get("macro_pattern_evidence", 0),
+        "macro_pattern_timeline_rows": counts.get("macro_pattern_timeline_rows", 0),
         "applied_expansions": counts.get("applied_expansions", 0),
         "applied_revisions": counts.get("applied_revisions", 0),
+        "schema_revisions": counts.get("schema_revisions", 0),
         "coevolution_iterations": counts.get("coevolution_iterations", 0),
         "llm_judge_records": counts.get("llm_judge_records", 0),
     }

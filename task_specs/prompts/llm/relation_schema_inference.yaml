@@ -1,0 +1,34 @@
+id: relation_schema_inference
+category: llm
+name: Relation Schema Inference
+description: Infer compact relation schema for taxonomy-guided evolution modeling.
+task_variables:
+  - name: domain_id
+    required: true
+  - name: entity_types
+    required: true
+  - name: strong_edge_types
+    required: true
+  - name: max_relation_types
+    required: true
+  - name: fixed_schema
+    required: true
+  - name: sample_documents
+    required: true
+static_variables: []
+template: |
+  Infer a domain-appropriate relation extraction schema for taxonomy-guided evolution modeling.
+  Keep the schema compact and compatible with quote-grounded evidence extraction.
+
+  Domain id: {domain_id}
+  Entity types: {entity_types}
+  Core strong edge types to preserve unless inappropriate: {strong_edge_types}
+  Maximum relation types: {max_relation_types}
+
+  Fixed fallback schema:
+  {fixed_schema}
+
+  Sample documents:
+  {sample_documents}
+
+  Return JSON: {"relation_types": [{"edge_type": "", "label": "", "definition": "", "source_role": "", "target_role": "", "directionality": "directed", "temporal_constraint": "none", "evidence_slots": ["mechanism"], "positive_cues": [], "negative_cues": [], "counterexamples": [], "strong_edge": false}]}.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,11 +36,14 @@ from evotaxa.induction import (
 from evotaxa.io import write_json, write_jsonl
 from evotaxa.loaders import attach_node_support, infer_assignments_from_text, load_assignments, load_documents, load_taxonomy_nodes
 from evotaxa.llm import build_llm_client, extract_document_entities, extract_relations_for_pairs, judge_edge_evidence, judge_schema_revision, judge_taxonomy_candidate
+from evotaxa.llm import summarize_macro_pattern
+from evotaxa.macro_patterns import synthesize_macro_patterns
 from evotaxa.schema import adapt_schema_after_graph, propose_schema_revision_candidates, resolve_initial_schema
 from evotaxa.search import extract_branch_points, search_evolution_chains
 from evotaxa.scoring import build_hook_score_report, score_forecast_hooks
 from evotaxa.state import build_evolution_state_snapshot, build_state_transition_report
 from evotaxa.taxonomy import build_taxonomy_events, enrich_taxonomy_nodes, judge_taxonomy_quality
+from evotaxa.temporal_windows import build_temporal_windows
 from evotaxa.trajectory import infer_evolution_trajectories
 
 
@@ -104,7 +108,8 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     taxonomy_judgements: dict[str, dict[str, Any]] = {}
     if full and expansion_candidates:
         doc_map = {doc.doc_id: doc for doc in docs}
-        for candidate in expansion_candidates[:20]:
+        judge_limit = max(0, int(config.graph.llm_taxonomy_judge_limit))
+        for candidate in expansion_candidates[:judge_limit]:
             context = "\n\n".join(doc_map[doc_id].full_text for doc_id in candidate.get("support_documents", []) if doc_id in doc_map)
             record = judge_taxonomy_candidate(llm_client, candidate=candidate, context=context)
             llm_records.append(record)
@@ -261,6 +266,29 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
         edge_score_rows=graph_layer["edge_score_rows"],
         relation_rejections=graph_layer["relation_rejections"],
     )
+    macro_patterns = _build_macro_pattern_layer(
+        docs=docs,
+        nodes=nodes,
+        taxonomy_events=taxonomy_events,
+        state_snapshot=state_snapshot,
+        state_transitions=state_transitions,
+        graph_layer=graph_layer,
+        schema_revisions=schema_revisions,
+        relation_rejections=graph_layer["relation_rejections"],
+        config=config,
+        llm_client=llm_client,
+        llm_records=llm_records,
+        full=full,
+    )
+    temporal_windows = build_temporal_windows(
+        docs=docs,
+        nodes=nodes,
+        entities=entities,
+        mentions=mentions,
+        edges=graph_layer["downstream_edges"],
+        trajectory_rows=graph_layer["trajectory_rows"],
+        config=config.temporal_windows,
+    )
     quality_report = build_quality_report(
         node_quality=node_quality,
         entity_quality_report=entity_quality_report,
@@ -329,6 +357,13 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     write_jsonl(output_root / "trajectory" / "trajectory_eval.jsonl", graph_layer["trajectory_eval"])
     write_json(output_root / "state" / "evolution_state.json", state_snapshot)
     write_jsonl(output_root / "state" / "state_transitions.jsonl", state_transitions)
+    write_jsonl(output_root / "macro_patterns" / "pattern_profiles.jsonl", macro_patterns["profiles"])
+    write_jsonl(output_root / "macro_patterns" / "pattern_evidence.jsonl", macro_patterns["evidence_records"])
+    write_jsonl(output_root / "macro_patterns" / "pattern_timeline.jsonl", macro_patterns["timeline"])
+    write_json(output_root / "macro_patterns" / "pattern_summary.json", macro_patterns["summary"])
+    write_jsonl(output_root / "temporal_windows" / "micro_windows.jsonl", temporal_windows["windows"])
+    write_jsonl(output_root / "temporal_windows" / "window_assignments.jsonl", temporal_windows["assignments"])
+    write_json(output_root / "temporal_windows" / "window_summary.json", temporal_windows["summary"])
     write_jsonl(output_root / "hooks" / "forecast_hooks.jsonl", forecast_hooks)
     write_jsonl(output_root / "hooks" / "social_analysis_hooks.jsonl", social_hooks)
     write_json(output_root / "hooks" / "hook_score_report.json", hook_score_report)
@@ -388,6 +423,11 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "evolution_chains": len(graph_layer["chains"]),
             "trajectories": len(graph_layer["trajectory_rows"]),
             "state_transitions": len(state_transitions),
+            "macro_patterns": len(macro_patterns["profiles"]),
+            "macro_pattern_evidence": len(macro_patterns["evidence_records"]),
+            "macro_pattern_timeline_rows": len(macro_patterns["timeline"]),
+            "temporal_windows": len(temporal_windows["windows"]),
+            "temporal_window_assignments": len(temporal_windows["assignments"]),
             "branch_points": len(graph_layer["branch_points"]),
             "forecast_hooks": len(forecast_hooks),
             "social_analysis_hooks": len(social_hooks),
@@ -430,6 +470,13 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
             "trajectory_eval": "trajectory/trajectory_eval.jsonl",
             "evolution_state": "state/evolution_state.json",
             "state_transitions": "state/state_transitions.jsonl",
+            "macro_pattern_profiles": "macro_patterns/pattern_profiles.jsonl",
+            "macro_pattern_evidence": "macro_patterns/pattern_evidence.jsonl",
+            "macro_pattern_timeline": "macro_patterns/pattern_timeline.jsonl",
+            "macro_pattern_summary": "macro_patterns/pattern_summary.json",
+            "temporal_windows": "temporal_windows/micro_windows.jsonl",
+            "temporal_window_assignments": "temporal_windows/window_assignments.jsonl",
+            "temporal_window_summary": "temporal_windows/window_summary.json",
             "forecast_hooks": "hooks/forecast_hooks.jsonl",
             "taxonomy_graph_feedback": "feedback/taxonomy_graph_feedback.jsonl",
             "quality_report": "evaluation/quality_report.json",
@@ -452,6 +499,82 @@ def _run(config_or_path: EvoTaxaConfig | str | Path, *, full: bool) -> dict[str,
     return manifest
 
 
+def _build_macro_pattern_layer(
+    *,
+    docs: list[Any],
+    nodes: list[Any],
+    taxonomy_events: list[dict[str, Any]],
+    state_snapshot: dict[str, Any],
+    state_transitions: list[dict[str, Any]],
+    graph_layer: dict[str, Any],
+    schema_revisions: list[dict[str, Any]],
+    relation_rejections: list[dict[str, Any]],
+    config: EvoTaxaConfig,
+    llm_client: Any,
+    llm_records: list[Any],
+    full: bool,
+) -> dict[str, Any]:
+    if not full or not config.macro_patterns.enabled:
+        return {
+            "profiles": [],
+            "evidence_records": [],
+            "timeline": [],
+            "summary": {
+                "enabled": False,
+                "candidate_pattern_count": 0,
+                "reported_pattern_count": 0,
+                "evidence_record_count": 0,
+                "timeline_rows": 0,
+                "min_pattern_score": config.macro_patterns.min_pattern_score,
+            },
+        }
+    first_pass = synthesize_macro_patterns(
+        docs=docs,
+        nodes=nodes,
+        taxonomy_events=taxonomy_events,
+        state_snapshot=state_snapshot,
+        state_transitions=state_transitions,
+        trajectory_rows=graph_layer["trajectory_rows"],
+        edges=graph_layer["downstream_edges"],
+        edge_score_rows=graph_layer["edge_score_rows"],
+        schema_revisions=schema_revisions,
+        relation_rejections=relation_rejections,
+        config=config.macro_patterns,
+    )
+    if not config.macro_patterns.llm_summary_enabled:
+        return first_pass
+
+    evidence_by_pattern: dict[str, list[dict[str, Any]]] = {}
+    for evidence in first_pass["evidence_records"]:
+        for pattern_id in evidence.get("pattern_ids", []):
+            evidence_by_pattern.setdefault(str(pattern_id), []).append(evidence)
+    summaries: dict[str, dict[str, Any]] = {}
+    for profile in first_pass["profiles"]:
+        pattern_id = str(profile.get("pattern_id") or "")
+        record = summarize_macro_pattern(
+            llm_client,
+            pattern_profile=profile,
+            evidence_records=evidence_by_pattern.get(pattern_id, []),
+        )
+        llm_records.append(record)
+        if record.used_model and not record.error:
+            summaries[pattern_id] = record.output
+    return synthesize_macro_patterns(
+        docs=docs,
+        nodes=nodes,
+        taxonomy_events=taxonomy_events,
+        state_snapshot=state_snapshot,
+        state_transitions=state_transitions,
+        trajectory_rows=graph_layer["trajectory_rows"],
+        edges=graph_layer["downstream_edges"],
+        edge_score_rows=graph_layer["edge_score_rows"],
+        schema_revisions=schema_revisions,
+        relation_rejections=relation_rejections,
+        config=config.macro_patterns,
+        llm_summaries=summaries,
+    )
+
+
 def _extract_prepare_entities(
     docs: list[Any],
     assignments: dict[str, list[str]],
@@ -465,17 +588,31 @@ def _extract_prepare_entities(
     entities, mentions = extract_entities(docs, assignments, config.graph)
     llm_entity_records: list[Any] = []
     if full:
-        for doc in docs:
-            record = extract_document_entities(
-                llm_client,
-                doc_id=doc.doc_id,
-                title=doc.title,
-                text=doc.text,
-                entity_types=list(schema_bundle.entity_schema.keys()) or config.graph.entity_types,
-                max_entities=config.graph.llm_entity_extraction_limit,
+        tasks = [
+            (
+                index,
+                doc,
+                list(schema_bundle.entity_schema.keys()) or config.graph.entity_types,
+                config.graph.llm_entity_extraction_limit,
+                schema_bundle.entity_schema,
             )
-            llm_records.append(record)
-            llm_entity_records.append(record)
+            for index, doc in enumerate(docs)
+        ]
+        ordered_records = _run_parallel(
+            tasks,
+            lambda task: extract_document_entities(
+                llm_client,
+                doc_id=task[1].doc_id,
+                title=task[1].title,
+                text=task[1].text,
+                entity_types=task[2],
+                max_entities=task[3],
+                entity_schema=task[4],
+            ),
+            max_workers=config.llm.max_workers,
+        )
+        llm_records.extend(ordered_records)
+        llm_entity_records.extend(ordered_records)
         entities, mentions, llm_entity_report = merge_llm_entity_mentions(
             docs,
             assignments,
@@ -545,6 +682,7 @@ def _build_graph_layer(
         extracted_edges, relation_extraction_report, relation_rejections = _extract_schema_guided_edges(
             docs,
             entities,
+            mentions,
             config,
             llm_client,
             llm_records,
@@ -554,16 +692,24 @@ def _build_graph_layer(
         edges = merge_edges_by_confidence([*extracted_edges, *edges])
     if full and edges:
         doc_map = {doc.doc_id: doc for doc in docs}
+        edge_tasks = list(enumerate(edges[: max(0, config.graph.llm_edge_judge_limit)]))
+        judged_results = _run_parallel(
+            edge_tasks,
+            lambda task: (
+                task[1],
+                judge_edge_evidence(
+                    llm_client,
+                    edge=task[1].to_record(),
+                    source_text=doc_map.get(task[1].source_document).full_text if doc_map.get(task[1].source_document) else "",
+                    target_text=doc_map.get(task[1].target_document).full_text if doc_map.get(task[1].target_document) else "",
+                    relation_schema=schema_bundle.relation_schema,
+                    evidence_schema=schema_bundle.evidence_schema,
+                ),
+            ),
+            max_workers=config.llm.max_workers,
+        )
         judged_edges = []
-        for edge in edges[: max(0, config.graph.llm_edge_judge_limit)]:
-            record = judge_edge_evidence(
-                llm_client,
-                edge=edge.to_record(),
-                source_text=doc_map.get(edge.source_document).full_text if doc_map.get(edge.source_document) else "",
-                target_text=doc_map.get(edge.target_document).full_text if doc_map.get(edge.target_document) else "",
-                relation_schema=schema_bundle.relation_schema,
-                evidence_schema=schema_bundle.evidence_schema,
-            )
+        for edge, record in judged_results:
             llm_records.append(record)
             judged_edges.append(_apply_edge_judgement(edge, record.output, schema_bundle.evidence_schema))
         judged_ids = {edge.edge_id for edge in judged_edges}
@@ -607,9 +753,23 @@ def _build_graph_layer(
     }
 
 
+def _run_parallel(tasks: list[tuple[int, Any]], fn: Any, *, max_workers: int) -> list[Any]:
+    if not tasks:
+        return []
+    if max_workers <= 1 or len(tasks) == 1:
+        return [fn(task) for task in tasks]
+    results: list[Any] = [None] * len(tasks)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {executor.submit(fn, task): task[0] for task in tasks}
+        for future in as_completed(future_to_index):
+            results[future_to_index[future]] = future.result()
+    return results
+
+
 def _extract_schema_guided_edges(
     docs: list[Any],
     entities: list[Any],
+    mentions: list[Any],
     config: EvoTaxaConfig,
     llm_client: Any,
     llm_records: list[Any],
@@ -618,6 +778,7 @@ def _extract_schema_guided_edges(
     pairs = build_relation_extraction_pairs(
         docs,
         entities,
+        mentions,
         config.graph,
         limit=max(0, config.graph.llm_relation_extraction_limit),
     )
@@ -626,15 +787,26 @@ def _extract_schema_guided_edges(
     rejections: list[dict[str, Any]] = []
     document_texts = {doc.doc_id: doc.full_text for doc in docs}
     batch_size = max(1, int(config.graph.llm_relation_batch_size or 1))
-    for batch_start in range(0, len(pairs), batch_size):
-        batch = pairs[batch_start : batch_start + batch_size]
-        record = extract_relations_for_pairs(
-            llm_client,
-            pairs=batch,
-            document_texts=document_texts,
-            relation_schema=schema_bundle.relation_schema,
-            evidence_schema=schema_bundle.evidence_schema,
-        )
+    batch_tasks = [
+        (batch_start // batch_size, batch_start, pairs[batch_start : batch_start + batch_size])
+        for batch_start in range(0, len(pairs), batch_size)
+    ]
+    batch_results = _run_parallel(
+        batch_tasks,
+        lambda task: (
+            task[1],
+            task[2],
+            extract_relations_for_pairs(
+                llm_client,
+                pairs=task[2],
+                document_texts=document_texts,
+                relation_schema=schema_bundle.relation_schema,
+                evidence_schema=schema_bundle.evidence_schema,
+            ),
+        ),
+        max_workers=config.llm.max_workers,
+    )
+    for batch_start, batch, record in batch_results:
         llm_records.append(record)
         rows = record.output.get("relations") if isinstance(record.output.get("relations"), list) else []
         outputs = _relation_outputs_by_pair(rows)
@@ -654,6 +826,8 @@ def _extract_schema_guided_edges(
                 "target_entity": (pair.get("target_entity") or {}).get("entity_id"),
                 "source_document": pair.get("source_document"),
                 "target_document": pair.get("target_document"),
+                "candidate_score": pair.get("candidate_score"),
+                "candidate_evidence": pair.get("candidate_evidence") or {},
                 "accepted": edge is not None,
                 "edge_id": edge.edge_id if edge else "",
                 "edge_type": output.get("edge_type"),

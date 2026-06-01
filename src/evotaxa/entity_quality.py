@@ -72,6 +72,10 @@ def score_entity_quality(
         return 1.0, ["allowlist"]
     if norm in denylist:
         return 0.0, ["denylist"]
+    if norm in _domain_stop_phrases():
+        return 0.0, ["domain_stop_phrase"]
+    if norm in _schema_bucket_phrases():
+        return 0.0, ["schema_bucket_phrase"]
 
     if not tokens:
         reasons.append("no_content_tokens")
@@ -89,6 +93,8 @@ def score_entity_quality(
     if norm in generic_phrases:
         reasons.append("generic_phrase")
         score -= 0.4
+    if token_count == 1 and norm not in allowlist and norm in _single_token_stopwords():
+        return 0.0, ["generic_single_token"]
 
     lower_name = name.lower()
     if any(marker in lower_name for marker in [" and ", " the ", " of ", " for "]):
@@ -112,11 +118,211 @@ def score_entity_quality(
     if len(name) > 80:
         reasons.append("too_long")
         score -= 0.35
+    if _looks_like_incomplete_phrase(name):
+        reasons.append("incomplete_phrase")
+        score -= 0.5
     if _looks_like_title_fragment(name):
         reasons.append("title_fragment")
         score -= 0.28
 
     return max(0.0, min(1.0, score)), reasons or ["passed_heuristics"]
+
+
+def _domain_stop_phrases() -> set[str]:
+    raw = {
+        "abstract",
+        "additionally",
+        "as result",
+        "as such",
+        "at the same time",
+        "background",
+        "chapter",
+        "contains",
+        "finally",
+        "first",
+        "for example",
+        "for these reasons",
+        "furthermore",
+        "hence",
+        "here",
+        "however",
+        "keywords",
+        "concepts",
+        "examples",
+        "in contrast",
+        "in addition",
+        "in the latter",
+        "in particular",
+        "in recent years",
+        "in this context",
+        "in this dissertation",
+        "in this essay",
+        "in this thesis",
+        "in this work",
+        "for this purpose",
+        "indeed",
+        "introduction",
+        "moreover",
+        "nature",
+        "objective",
+        "on the other hand",
+        "recently",
+        "specifically",
+        "therefore",
+        "this chapter",
+        "this paper",
+        "this study",
+        "this work",
+        "to this end",
+        "second",
+        "thus",
+    }
+    return {_norm_text(value) for value in raw if _norm_text(value)}
+
+
+def _single_token_stopwords() -> set[str]:
+    return {
+        "abstract",
+        "agent",
+        "also",
+        "background",
+        "chapter",
+        "china",
+        "contains",
+        "covid",
+        "data",
+        "design",
+        "facebook",
+        "finally",
+        "first",
+        "free",
+        "keywords",
+        "concepts",
+        "examples",
+        "language",
+        "large",
+        "here",
+        "however",
+        "internet",
+        "introduction",
+        "lectures",
+        "march",
+        "media",
+        "method",
+        "methods",
+        "model",
+        "modeling",
+        "objective",
+        "paper",
+        "review",
+        "recently",
+        "nature",
+        "purpose",
+        "science",
+        "second",
+        "specifically",
+        "study",
+        "thus",
+        "work",
+    }
+
+
+def _schema_bucket_phrases() -> set[str]:
+    raw = {
+        "access ethics governance",
+        "agent based modeling social simulation",
+        "bibliometrics knowledge mapping",
+        "causal inference experiments",
+        "computational infrastructure algorithms",
+        "computational infrastructure tooling",
+        "computational social science",
+        "data source evidence base",
+        "digital trace data",
+        "evaluation validation practice",
+        "llm assisted methods",
+        "machine learning ai classification",
+        "measurement annotation strategy",
+        "modeling simulation strategy",
+        "network analysis",
+        "online interaction social media",
+        "reproducibility ethics governance",
+        "spatial gis geocomputation",
+        "survey administrative population data systems",
+        "text as data computational text analysis",
+    }
+    return {_norm_text(value) for value in raw if _norm_text(value)}
+
+
+def _looks_like_incomplete_phrase(name: str) -> bool:
+    norm = " ".join(__import__("re").findall(r"[a-z0-9]+", str(name or "").lower()))
+    if not norm:
+        return False
+    tokens = norm.split()
+    boundary_words = {"a", "an", "and", "as", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"}
+    leading_fragment_words = {
+        *boundary_words,
+        "our",
+        "their",
+        "these",
+        "this",
+        "those",
+        "we",
+        "while",
+    }
+    if tokens and tokens[-1] in boundary_words:
+        return True
+    if tokens and tokens[0] in leading_fragment_words:
+        return True
+    sentence_markers = [
+        " has been ",
+        " have been ",
+        " is a ",
+        " is an ",
+        " is used ",
+        " are ",
+        " was ",
+        " were ",
+        " we ",
+        " our ",
+        " this ",
+        " that ",
+        " the ",
+        " suggests that ",
+        " findings suggest ",
+    ]
+    padded = f" {norm} "
+    if any(marker in padded for marker in sentence_markers):
+        return True
+    if len(tokens) >= 4 and not _has_method_specific_anchor(tokens):
+        return True
+    return False
+
+
+def _has_method_specific_anchor(tokens: list[str]) -> bool:
+    anchors = {
+        "algorithm",
+        "allocation",
+        "annotation",
+        "bayesian",
+        "benchmark",
+        "classification",
+        "dirichlet",
+        "embedding",
+        "experiment",
+        "inference",
+        "lda",
+        "learning",
+        "machine",
+        "matching",
+        "model",
+        "network",
+        "regression",
+        "simulation",
+        "survey",
+        "topic",
+        "validation",
+    }
+    return bool(set(tokens) & anchors)
 
 
 def _looks_like_title_fragment(name: str) -> bool:

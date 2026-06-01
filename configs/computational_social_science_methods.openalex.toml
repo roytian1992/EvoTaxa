@@ -1,0 +1,189 @@
+[project]
+name = "EvoTaxa Computational Social Science Methods"
+domain_id = "computational_social_science_methods"
+run_id = "openalex_css_methods_screened_clean_entities_v1"
+
+[corpus]
+path = "../data/computational_social_science_screening/llm_full_cleaning_repair_20260530_0025/merged/corpus.screened.jsonl"
+source_type = "openalex_work"
+id_fields = ["doc_id", "openalex_id", "id"]
+title_fields = ["title", "display_name"]
+text_fields = ["abstract", "text"]
+date_fields = ["publication_date", "publication_year", "year"]
+slice_fields = ["chronology_slice", "publication_year", "year"]
+role_fields = ["role"]
+accepted_roles = ["core"]
+cutoff_date = "2026-12-31"
+missing_date_policy = "drop"
+
+[taxonomy]
+nodes_path = "computational_social_science_methods.taxonomy.json"
+induction_enabled = false
+expansion_enabled = false
+max_induced_nodes_per_dimension = 8
+min_cluster_documents = 10
+expansion_threshold = 0.48
+expansion_acceptance_threshold = 0.55
+max_expansion_candidates = 60
+max_applied_expansions = 20
+coevolution_enabled = false
+max_coevolution_iterations = 0
+max_revision_candidates = 40
+max_applied_revisions = 15
+revision_acceptance_threshold = 0.58
+
+[taxonomy.dimensions.methods]
+display_name = "Computational Social Science Methods"
+definition = "Method families, data practices, measurement strategies, and computational designs used in social-science research."
+
+[schema]
+entity_schema_mode = "fixed"
+relation_schema_mode = "fixed"
+evidence_schema_mode = "fixed"
+schema_inference_sample_size = 40
+schema_revision_min_support = 5
+max_schema_revisions = 5
+
+[graph]
+entity_dimensions = ["methods"]
+entity_types = ["method", "data_source", "measurement_strategy", "modeling_strategy", "evaluation_protocol", "governance_practice"]
+strong_edge_types = ["extends", "improves", "replaces", "adapts"]
+method_cue_terms = [
+  "method",
+  "methods",
+  "model",
+  "models",
+  "analysis",
+  "measurement",
+  "classification",
+  "annotation",
+  "simulation",
+  "experiment",
+  "causal",
+  "network",
+  "text",
+  "trace",
+  "data",
+  "platform",
+  "reproducibility",
+  "ethics",
+  "governance",
+  "benchmark"
+]
+min_entity_mentions = 3
+max_entities_per_document = 6
+max_edge_candidates_per_entity = 3
+max_pair_groups_per_node = 24
+min_entity_quality = 0.38
+llm_entity_extraction_limit = 0
+llm_relation_extraction_limit = 0
+llm_edge_judge_limit = 0
+trusted_edge_confidence_threshold = 0.65
+candidate_edge_confidence_threshold = 0.35
+require_verified_evidence_for_trusted = true
+generic_entity_phrases = ["this", "that", "study", "paper", "article", "approach", "method", "methods", "model", "models", "analysis", "data", "results", "research"]
+
+[graph.entity_patterns]
+method = [
+  "computational social science",
+  "computational text analysis",
+  "text as data",
+  "topic modeling",
+  "supervised classification",
+  "word embeddings",
+  "transformer models",
+  "large language models",
+  "LLM annotation",
+  "synthetic respondents",
+  "agent-based modeling",
+  "social simulation",
+  "network analysis",
+  "causal inference",
+  "survey experiment",
+  "field experiment",
+  "natural experiment"
+]
+data_source = [
+  "digital trace data",
+  "social media data",
+  "platform data",
+  "Twitter data",
+  "Facebook data",
+  "online behavioral data"
+]
+measurement_strategy = [
+  "stance detection",
+  "frame detection",
+  "sentiment analysis",
+  "ideology detection",
+  "content analysis",
+  "survey measurement",
+  "automated annotation"
+]
+modeling_strategy = [
+  "agent-based model",
+  "simulation model",
+  "graph model",
+  "network model",
+  "language model",
+  "embedding model"
+]
+evaluation_protocol = [
+  "benchmark",
+  "validation",
+  "replication",
+  "reproducibility",
+  "human annotation",
+  "gold standard"
+]
+governance_practice = [
+  "data access",
+  "platform data access",
+  "research ethics",
+  "privacy",
+  "data governance",
+  "transparency"
+]
+
+[graph.entity_aliases]
+"large language models" = ["large language model", "LLM", "LLMs", "GPT", "generative AI"]
+"text as data" = ["text-as-data", "text as data methods"]
+"computational text analysis" = ["automated text analysis", "computational content analysis"]
+"digital trace data" = ["digital traces", "trace data", "behavioral trace data"]
+"social media data" = ["Twitter data", "Facebook data", "platform data"]
+"agent-based modeling" = ["agent based modeling", "agent-based model", "agent based model"]
+"network analysis" = ["social network analysis", "network science", "graph analysis"]
+"automated annotation" = ["automatic annotation", "machine annotation", "LLM annotation"]
+"reproducibility" = ["replication", "computational reproducibility"]
+
+[graph.edge_cues]
+extends = ["extends", "builds on", "build upon", "adds", "incorporates", "expands", "generalizes"]
+improves = ["improves", "outperforms", "increases", "reduces error", "enhances", "more accurate", "more robust"]
+adapts = ["adapts", "applies", "transfers", "ports", "uses in", "repurposes"]
+replaces = ["replaces", "supersedes", "instead of", "moves beyond", "shifts from"]
+uses_component = ["uses", "integrates", "combines", "relies on", "leverages"]
+compares = ["compares", "benchmark", "baseline", "relative to", "versus"]
+
+[macro_patterns]
+enabled = true
+min_pattern_score = 0.2
+max_patterns = 20
+max_evidence_per_pattern = 10
+use_negative_evidence = true
+llm_summary_enabled = false
+
+[temporal_windows]
+enabled = true
+scope_types = ["global", "taxonomy_node", "entity_type", "relation_type"]
+min_documents_per_window = 500
+min_mentions_per_window = 800
+min_edges_per_window = 250
+min_duration_days = 30
+max_duration_days = 1095
+
+[llm]
+provider = "deterministic"
+enabled_tasks = []
+
+[output]
+root = "../examples/openalex_css_methods_screened_clean_entities_v1_output"

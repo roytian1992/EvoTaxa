@@ -1,0 +1,36 @@
+id: entity_evidence_schema_inference
+category: llm
+name: Entity And Evidence Schema Inference
+description: Infer compact entity and evidence schemas.
+task_variables:
+  - name: domain_id
+    required: true
+  - name: taxonomy_dimensions
+    required: true
+  - name: configured_entity_types
+    required: true
+  - name: fixed_entity_schema
+    required: true
+  - name: fixed_evidence_schema
+    required: true
+  - name: sample_documents
+    required: true
+static_variables: []
+template: |
+  Infer a compact entity and evidence schema for taxonomy-guided evolution modeling.
+  Entity types should describe domain objects worth tracking over time. Evidence slots should be quote-grounded fields needed to validate entities and relations.
+
+  Domain id: {domain_id}
+  Taxonomy dimensions: {taxonomy_dimensions}
+  Configured entity types: {configured_entity_types}
+
+  Fixed entity schema:
+  {fixed_entity_schema}
+
+  Fixed evidence schema:
+  {fixed_evidence_schema}
+
+  Sample documents:
+  {sample_documents}
+
+  Return JSON: {"entity_types": [{"entity_type": "", "definition": "", "inclusion_criteria": "", "exclusion_criteria": "", "aliases": [], "allowed_dimensions": [], "example_mentions": [], "negative_examples": [], "quality_rules": []}], "evidence_slots": [{"slot": "", "definition": "", "required": true, "quote_required": true, "allowed_source": "either", "validation": "substring"}]}.

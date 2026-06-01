@@ -1,0 +1,93 @@
+[
+  {
+    "node_id": "methods__digital_trace_data",
+    "dimension": "methods",
+    "canonical_label": "Digital Trace Data",
+    "definition": "Methods using platform logs, clickstreams, social media traces, mobility traces, or other passively observed behavioral records.",
+    "aliases": ["digital trace data", "digital traces", "trace data", "behavioral trace data", "platform data", "clickstream", "online behavioral data", "mobility trace"]
+  },
+  {
+    "node_id": "methods__text_as_data",
+    "dimension": "methods",
+    "canonical_label": "Text-as-Data / Computational Text Analysis",
+    "definition": "Methods that turn text into structured social-science measurements, including classification, topic models, embeddings, stance, frame, and ideology detection.",
+    "aliases": ["text as data", "computational text analysis", "text analysis", "text-as-data", "natural language processing", "NLP", "content analysis", "automated text analysis", "machine coding", "event data", "sentiment analysis", "stance detection", "topic modeling"]
+  },
+  {
+    "node_id": "methods__network_analysis",
+    "dimension": "methods",
+    "canonical_label": "Network Analysis",
+    "definition": "Methods using graph, network, diffusion, community, or relational structure to analyze social behavior and institutions.",
+    "aliases": ["network analysis", "social network analysis", "graph analysis", "diffusion network", "network science"]
+  },
+  {
+    "node_id": "methods__causal_inference_experiments",
+    "dimension": "methods",
+    "canonical_label": "Causal Inference & Experiments",
+    "definition": "Methods that estimate causal effects with experiments, quasi-experiments, natural experiments, matching, instrumental variables, or related designs.",
+    "aliases": ["causal inference", "counterfactual", "experiment", "field experiment", "survey experiment", "natural experiment", "quasi-experiment", "randomized experiment", "treatment effect"]
+  },
+  {
+    "node_id": "methods__agent_based_modeling",
+    "dimension": "methods",
+    "canonical_label": "Agent-Based Modeling / Social Simulation",
+    "definition": "Simulation methods representing agents, rules, interactions, and emergent social outcomes.",
+    "aliases": ["agent-based modeling", "agent based model", "agent-based model", "multi-agent", "social simulation", "computational model", "generative social science", "artificial society", "complex systems"]
+  },
+  {
+    "node_id": "methods__llm_assisted_methods",
+    "dimension": "methods",
+    "canonical_label": "LLM-Assisted Social Science Methods",
+    "definition": "Methods using large language models for annotation, simulation, synthetic respondents, coding, measurement, or research assistance.",
+    "aliases": ["large language model", "large language models", "LLM", "LLMs", "GPT", "generative AI", "synthetic respondents", "LLM annotation", "LLM-assisted"]
+  },
+  {
+    "node_id": "methods__reproducibility_ethics_governance",
+    "dimension": "methods",
+    "canonical_label": "Reproducibility / Ethics / Data Governance",
+    "definition": "Methods and practices concerned with reproducibility, platform data access, privacy, ethics, transparency, and governance of computational social-science data.",
+    "aliases": ["reproducibility", "replication", "data access", "platform data access", "research ethics", "ethics", "privacy", "data governance", "transparency", "open science", "open data"]
+  },
+  {
+    "node_id": "methods__spatial_gis_geocomputation",
+    "dimension": "methods",
+    "canonical_label": "Spatial / GIS / Geocomputation",
+    "definition": "Methods using spatial data analysis, geographic information systems, geocomputation, mobility geography, or location-aware modeling for social-science questions.",
+    "aliases": ["spatial data analysis", "spatial analysis", "GIS", "geographic information system", "geographic information systems", "geocomputation", "geospatial analysis", "spatial econometrics", "location data", "mobility data"]
+  },
+  {
+    "node_id": "methods__survey_admin_population_data",
+    "dimension": "methods",
+    "canonical_label": "Survey / Administrative / Population Data Systems",
+    "definition": "Methods and data infrastructures for surveys, census records, administrative data, population registers, social accounts, and large structured social-science datasets.",
+    "aliases": ["survey data", "social survey", "census data", "administrative data", "population data", "national accounts", "social accounts", "input-output tables", "migration flows", "contingency tables", "SIPP", "data archive"]
+  },
+  {
+    "node_id": "methods__machine_learning_ai_classification",
+    "dimension": "methods",
+    "canonical_label": "Machine Learning / AI Classification",
+    "definition": "Methods using machine learning, artificial intelligence, supervised classification, predictive modeling, expert systems, or automated pattern recognition for social-science evidence.",
+    "aliases": ["machine learning", "artificial intelligence", "AI", "supervised classification", "classification model", "predictive modeling", "expert system", "neural network", "deep learning", "data mining"]
+  },
+  {
+    "node_id": "methods__bibliometrics_knowledge_mapping",
+    "dimension": "methods",
+    "canonical_label": "Bibliometrics / Knowledge Mapping",
+    "definition": "Methods using citation analysis, co-citation, bibliographic coupling, science mapping, topic landscapes, or knowledge graphs to study research fields and social-science knowledge production.",
+    "aliases": ["bibliometrics", "scientometrics", "citation analysis", "co-citation", "bibliographic coupling", "science mapping", "knowledge mapping", "VOSviewer", "knowledge graph", "research trends"]
+  },
+  {
+    "node_id": "methods__online_social_media_interaction",
+    "dimension": "methods",
+    "canonical_label": "Online Interaction / Social Media Methods",
+    "definition": "Methods for studying online communities, social media, web forums, digital conversation, platform interaction, and internet-mediated social behavior.",
+    "aliases": ["social media", "Twitter", "Facebook", "online community", "online communities", "web forum", "internet research", "social computing", "online interaction", "conversation map", "IRC networks"]
+  },
+  {
+    "node_id": "methods__computational_infrastructure_algorithms",
+    "dimension": "methods",
+    "canonical_label": "Computational Infrastructure / Algorithms",
+    "definition": "Computational algorithms, software systems, parallel computation, optimization, databases, and infrastructure that enable large-scale social-science analysis.",
+    "aliases": ["parallel computation", "parallel computing", "algorithm", "algorithms", "optimization", "computational method", "software system", "database", "information system", "collaboratory", "visualization", "large-scale computation"]
+  }
+]

@@ -143,7 +143,7 @@ For development with a local OpenAI-compatible server:
 [llm]
 provider = "openai_compat"
 model_name = "your-model-name"
-api_key = "token-abc123"
+api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "edge_evidence_judge"]
 ```

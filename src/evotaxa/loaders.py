@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+import re
 from typing import Any
 
 from evotaxa.config import EvoTaxaConfig
@@ -212,9 +213,16 @@ def infer_assignments_from_text(docs: list[Document], nodes: list[TaxonomyNode])
         text = doc.full_text.lower()
         for node in nodes:
             candidates = [node.canonical_label, *node.aliases]
-            if any(candidate and candidate.lower() in text for candidate in candidates):
+            if any(candidate and _phrase_in_text(candidate, text) for candidate in candidates):
                 by_doc[doc.doc_id].add(node.node_id)
     return {doc_id: sorted(node_ids) for doc_id, node_ids in by_doc.items()}
+
+
+def _phrase_in_text(phrase: str, lower_text: str) -> bool:
+    normalized = normalize_space(phrase).lower()
+    if not normalized:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", lower_text) is not None
 
 
 def attach_node_support(

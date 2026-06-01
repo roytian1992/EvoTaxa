@@ -323,7 +323,8 @@ def _phrase_matches_doc(phrase: str, doc: Document) -> bool:
 def _semantic_heterogeneity(docs: list[Document]) -> float:
     if len(docs) <= 1:
         return 0.0
-    doc_token_sets = [set(tokenize(doc.full_text)) for doc in docs[:30]]
+    sample = _spread_sample(docs, limit=120)
+    doc_token_sets = [set(tokenize(doc.full_text)) for doc in sample]
     similarities: list[float] = []
     for index, left in enumerate(doc_token_sets):
         for right in doc_token_sets[index + 1 :]:
@@ -333,6 +334,15 @@ def _semantic_heterogeneity(docs: list[Document]) -> float:
     if not similarities:
         return 0.0
     return max(0.0, 1.0 - sum(similarities) / len(similarities))
+
+
+def _spread_sample(docs: list[Document], *, limit: int) -> list[Document]:
+    if len(docs) <= limit:
+        return docs
+    if limit <= 0:
+        return []
+    step = len(docs) / limit
+    return [docs[min(len(docs) - 1, int(index * step))] for index in range(limit)]
 
 
 def _temporal_burst(docs: list[Document]) -> float:

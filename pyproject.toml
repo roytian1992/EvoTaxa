@@ -12,7 +12,10 @@ license = { text = "MIT" }
 authors = [
   { name = "EvoTaxa Contributors" }
 ]
-dependencies = []
+dependencies = [
+  "json-repair>=0.44.1",
+  "PyYAML>=6.0.1",
+]
 
 [project.scripts]
 evotaxa = "evotaxa.cli:main"

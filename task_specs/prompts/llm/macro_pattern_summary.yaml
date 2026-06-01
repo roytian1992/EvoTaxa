@@ -1,0 +1,21 @@
+id: macro_pattern_summary
+category: llm
+name: Macro Pattern Summary
+description: Summarize detector-backed macro evolution patterns.
+task_variables:
+  - name: pattern_profile
+    required: true
+  - name: evidence_records
+    required: true
+static_variables: []
+template: |
+  Summarize this macro evolution pattern using only the detector outputs below.
+  Do not invent a new pattern, score, node, trajectory, or evidence id. If evidence is weak, state the limitation briefly.
+
+  Pattern profile:
+  {pattern_profile}
+
+  Detector evidence records:
+  {evidence_records}
+
+  Return JSON with summary and caveats. summary must explain only the supplied detector-backed evidence.

@@ -63,7 +63,7 @@ policy_instrument = ["transparency mandate", "algorithmic audit"]
 [llm]
 provider = "openai_compat"
 model_name = "your-model-name"
-api_key = "token-abc123"
+api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = ["entity_extraction", "taxonomy_candidate_judge", "relation_extraction_batch", "relation_extraction", "edge_evidence_judge", "schema_revision_judge", "relation_schema_inference", "entity_evidence_schema_inference"]
 

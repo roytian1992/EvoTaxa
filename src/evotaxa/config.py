@@ -20,6 +20,8 @@ DEFAULT_EDGE_CUES: dict[str, list[str]] = {
     "background": ["related work", "prior work"],
 }
 
+QUOTE_RELATION_GROUNDING_MODES = {"substring", "one_sided_cue", "two_sided_cue"}
+
 
 @dataclass
 class CorpusConfig:
@@ -116,15 +118,19 @@ class GraphConfig:
     min_entity_mentions: int = 1
     max_entities_per_document: int = 12
     max_edge_candidates_per_entity: int = 24
+    max_pair_groups_per_node: int = 40
     llm_entity_extraction_limit: int = 12
+    llm_taxonomy_judge_limit: int = 20
     llm_relation_extraction_limit: int = 100
     llm_relation_batch_size: int = 1
+    llm_relation_candidate_min_score: float = 0.45
     llm_edge_judge_limit: int = 100
     alias_similarity_threshold: float = 0.86
     min_entity_quality: float = 0.42
     trusted_edge_confidence_threshold: float = 0.65
     candidate_edge_confidence_threshold: float = 0.35
     require_verified_evidence_for_trusted: bool = True
+    quote_relation_grounding_mode: str = "one_sided_cue"
     entity_allowlist: list[str] = field(default_factory=list)
     entity_denylist: list[str] = field(default_factory=list)
     generic_entity_phrases: list[str] = field(default_factory=lambda: [
@@ -170,9 +176,36 @@ class LLMConfig:
     base_url: str = ""
     enabled_tasks: list[str] = field(default_factory=list)
     cache_path: Path | None = None
+    prompt_dir: Path | None = None
+    system_prompt_id: str = "llm/system_json"
     max_retries: int = 1
     timeout_seconds: int = 120
     temperature: float = 0.0
+    max_tokens: int = 0
+    max_workers: int = 1
+    extra_body: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class MacroPatternConfig:
+    enabled: bool = False
+    min_pattern_score: float = 0.2
+    max_patterns: int = 20
+    max_evidence_per_pattern: int = 8
+    use_negative_evidence: bool = True
+    llm_summary_enabled: bool = False
+
+
+@dataclass
+class TemporalWindowConfig:
+    enabled: bool = False
+    scope_types: list[str] = field(default_factory=lambda: ["global", "taxonomy_node", "entity_type", "relation_type"])
+    min_documents_per_window: int = 80
+    min_mentions_per_window: int = 120
+    min_edges_per_window: int = 30
+    min_duration_days: int = 30
+    max_duration_days: int = 1095
+    max_windows_per_scope: int = 0
 
 
 @dataclass
@@ -184,6 +217,8 @@ class EvoTaxaConfig:
     schema: SchemaConfig
     graph: GraphConfig
     llm: LLMConfig
+    macro_patterns: MacroPatternConfig
+    temporal_windows: TemporalWindowConfig
     output: OutputConfig
 
 
@@ -193,7 +228,7 @@ def _resolve_path(base: Path, value: Any) -> Path | None:
     path = Path(str(value)).expanduser()
     if not path.is_absolute():
         path = base / path
-    return path
+    return path.resolve()
 
 
 def _list(data: dict[str, Any], key: str, default: list[str]) -> list[str]:
@@ -251,6 +286,16 @@ def _schema_mode(raw: Any) -> str:
     return mode
 
 
+def _quote_relation_grounding_mode(raw: Any) -> str:
+    mode = str(raw or "one_sided_cue").strip().lower()
+    if mode not in QUOTE_RELATION_GROUNDING_MODES:
+        raise ValueError(
+            f"Invalid quote_relation_grounding_mode: {mode}. "
+            f"Expected one of {sorted(QUOTE_RELATION_GROUNDING_MODES)}"
+        )
+    return mode
+
+
 def load_config(path: str | Path) -> EvoTaxaConfig:
     config_path = Path(path).expanduser().resolve()
     with config_path.open("rb") as handle:
@@ -265,6 +310,8 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
     taxonomy_raw = raw.get("taxonomy") or {}
     schema_raw = raw.get("schema") or {}
     graph_raw = raw.get("graph") or {}
+    macro_raw = raw.get("macro_patterns") or {}
+    temporal_raw = raw.get("temporal_windows") or {}
     llm_raw = raw.get("llm") or {}
     output_raw = raw.get("output") or {}
 
@@ -359,15 +406,19 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
         min_entity_mentions=int(graph_raw.get("min_entity_mentions") or 1),
         max_entities_per_document=int(graph_raw.get("max_entities_per_document") or 12),
         max_edge_candidates_per_entity=int(graph_raw.get("max_edge_candidates_per_entity") or 24),
+        max_pair_groups_per_node=int(graph_raw.get("max_pair_groups_per_node") or 40),
         llm_entity_extraction_limit=int(graph_raw.get("llm_entity_extraction_limit") or 12),
+        llm_taxonomy_judge_limit=int(graph_raw.get("llm_taxonomy_judge_limit", 20)),
         llm_relation_extraction_limit=int(graph_raw.get("llm_relation_extraction_limit", 100)),
         llm_relation_batch_size=int(graph_raw.get("llm_relation_batch_size", 1)),
+        llm_relation_candidate_min_score=float(graph_raw.get("llm_relation_candidate_min_score", 0.45)),
         llm_edge_judge_limit=int(graph_raw.get("llm_edge_judge_limit", 100)),
         alias_similarity_threshold=float(graph_raw.get("alias_similarity_threshold") or 0.86),
         min_entity_quality=float(graph_raw.get("min_entity_quality") or 0.42),
         trusted_edge_confidence_threshold=float(graph_raw.get("trusted_edge_confidence_threshold", 0.65)),
         candidate_edge_confidence_threshold=float(graph_raw.get("candidate_edge_confidence_threshold", 0.35)),
         require_verified_evidence_for_trusted=bool(graph_raw.get("require_verified_evidence_for_trusted", True)),
+        quote_relation_grounding_mode=_quote_relation_grounding_mode(graph_raw.get("quote_relation_grounding_mode")),
         entity_allowlist=_list(graph_raw, "entity_allowlist", []),
         entity_denylist=_list(graph_raw, "entity_denylist", []),
         generic_entity_phrases=_list(graph_raw, "generic_entity_phrases", GraphConfig().generic_entity_phrases),
@@ -392,9 +443,32 @@ def load_config(path: str | Path) -> EvoTaxaConfig:
             base_url=str(llm_raw.get("base_url") or ""),
             enabled_tasks=_list(llm_raw, "enabled_tasks", []),
             cache_path=_resolve_path(base, llm_raw.get("cache_path")),
+            prompt_dir=_resolve_path(base, llm_raw.get("prompt_dir")),
+            system_prompt_id=str(llm_raw.get("system_prompt_id") or "llm/system_json"),
             max_retries=int(llm_raw.get("max_retries") or 1),
             timeout_seconds=int(llm_raw.get("timeout_seconds") or 120),
             temperature=float(llm_raw.get("temperature") or 0.0),
+            max_tokens=int(llm_raw.get("max_tokens") or 0),
+            max_workers=max(1, int(llm_raw.get("max_workers") or 1)),
+            extra_body=dict(llm_raw.get("extra_body") or {}),
+        ),
+        macro_patterns=MacroPatternConfig(
+            enabled=bool(macro_raw.get("enabled", False)),
+            min_pattern_score=float(macro_raw.get("min_pattern_score", 0.2)),
+            max_patterns=int(macro_raw.get("max_patterns", 20)),
+            max_evidence_per_pattern=int(macro_raw.get("max_evidence_per_pattern", 8)),
+            use_negative_evidence=bool(macro_raw.get("use_negative_evidence", True)),
+            llm_summary_enabled=bool(macro_raw.get("llm_summary_enabled", False)),
+        ),
+        temporal_windows=TemporalWindowConfig(
+            enabled=bool(temporal_raw.get("enabled", False)),
+            scope_types=_list(temporal_raw, "scope_types", TemporalWindowConfig().scope_types),
+            min_documents_per_window=int(temporal_raw.get("min_documents_per_window") or 80),
+            min_mentions_per_window=int(temporal_raw.get("min_mentions_per_window") or 120),
+            min_edges_per_window=int(temporal_raw.get("min_edges_per_window") or 30),
+            min_duration_days=int(temporal_raw.get("min_duration_days") or 30),
+            max_duration_days=int(temporal_raw.get("max_duration_days") or 1095),
+            max_windows_per_scope=int(temporal_raw.get("max_windows_per_scope") or 0),
         ),
         output=OutputConfig(root=_resolve_path(base, output_raw.get("root")) or Path("data/evotaxa/run_lite")),
     )

@@ -1,0 +1,9 @@
+[llm]
+provider = "openai_compat"
+model_name = "Qwen3.5-397B-A17B-FP8"
+api_key_env = "EVOTAXA_LLM_API_KEY"
+base_url = "http://127.0.0.1:8001/v1"
+enabled_tasks = ["relevance_screening"]
+max_retries = 3
+timeout_seconds = 90
+temperature = 0.0

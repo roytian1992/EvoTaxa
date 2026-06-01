@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from evotaxa.config import GraphConfig
@@ -69,7 +70,9 @@ def audit_edge_evidence(
             continue
         source_verified = validate_evidence_quote(quote, source_text)
         target_verified = validate_evidence_quote(quote, target_text)
-        verified = source_verified or target_verified
+        substring_verified = source_verified or target_verified
+        grounding = _quote_relation_grounding(quote, edge, config)
+        verified = substring_verified and grounding["relation_supported"]
         matched_document = ""
         if target_verified:
             matched_document = edge.target_document
@@ -83,8 +86,12 @@ def audit_edge_evidence(
                 "quote": quote,
                 "description": description,
                 "verified": verified,
+                "substring_verified": substring_verified,
+                "relation_supported": grounding["relation_supported"],
+                "entity_token_hits": grounding["entity_token_hits"],
+                "relation_cue_hit": grounding["relation_cue_hit"],
                 "matched_document": matched_document,
-                "reason": "quote_verified" if verified else "quote_not_found_in_source_or_target",
+                "reason": _quote_check_reason(substring_verified, grounding["relation_supported"]),
             }
         )
 
@@ -117,7 +124,7 @@ def _edge_status(edge: EvolutionEdge, verified_quote_count: int, config: GraphCo
     if edge.confidence >= config.trusted_edge_confidence_threshold:
         if has_verified_evidence or not config.require_verified_evidence_for_trusted:
             return "trusted", "strong_edge_with_verified_evidence"
-        return "candidate", "strong_edge_needs_quote_verification"
+        return "candidate", "strong_edge_needs_relation_grounding"
 
     if edge.confidence >= config.candidate_edge_confidence_threshold:
         return "candidate", "below_trusted_confidence_threshold"
@@ -145,3 +152,123 @@ def _audit_fields(edge: EvolutionEdge) -> list[str]:
         if field not in fields:
             fields.append(field)
     return fields
+
+
+def _quote_check_reason(substring_verified: bool, relation_supported: bool) -> str:
+    if substring_verified and relation_supported:
+        return "quote_verified_relation_supported"
+    if substring_verified:
+        return "quote_found_but_relation_not_supported"
+    return "quote_not_found_in_source_or_target"
+
+
+def _quote_relation_grounding(quote: str, edge: EvolutionEdge, config: GraphConfig) -> dict[str, Any]:
+    quote_tokens = set(_tokens(quote))
+    if not quote_tokens:
+        return {"relation_supported": False, "entity_token_hits": [], "relation_cue_hit": False}
+
+    source_hits = _entity_token_hits(edge.source_entity, quote_tokens)
+    target_hits = _entity_token_hits(edge.target_entity, quote_tokens)
+    entity_hits = []
+    if source_hits:
+        entity_hits.append("source")
+    if target_hits:
+        entity_hits.append("target")
+
+    cue = str((edge.evidence or {}).get("cue") or "")
+    relation_cue_hit = bool(_relation_cue_hit(quote_tokens, edge.edge_type, cue))
+    relation_supported = _relation_supported_by_mode(
+        mode=config.quote_relation_grounding_mode,
+        entity_hit_count=len(entity_hits),
+        relation_cue_hit=relation_cue_hit,
+    )
+    return {
+        "relation_supported": relation_supported,
+        "entity_token_hits": entity_hits,
+        "relation_cue_hit": relation_cue_hit,
+    }
+
+
+def _relation_supported_by_mode(*, mode: str, entity_hit_count: int, relation_cue_hit: bool) -> bool:
+    if mode == "substring":
+        return True
+    if mode == "two_sided_cue":
+        return entity_hit_count >= 2 and relation_cue_hit
+    return entity_hit_count >= 1 and relation_cue_hit
+
+
+def _entity_token_hits(entity_id: str, quote_tokens: set[str]) -> list[str]:
+    entity_tokens = [token for token in _tokens(_entity_name_from_id(entity_id)) if token not in _weak_entity_tokens()]
+    if not entity_tokens:
+        return []
+    hits = [token for token in entity_tokens if token in quote_tokens]
+    if len(entity_tokens) == 1:
+        return hits if hits else []
+    needed = min(2, len(set(entity_tokens)))
+    return hits if len(set(hits)) >= needed else []
+
+
+def _entity_name_from_id(entity_id: str) -> str:
+    value = str(entity_id or "")
+    if "__" in value:
+        value = value.split("__", 1)[1]
+    return value.replace("_", " ")
+
+
+def _relation_cue_hit(quote_tokens: set[str], edge_type: str, cue: str) -> bool:
+    relation_terms = set(_tokens(cue))
+    relation_terms.update(_edge_type_terms(edge_type))
+    if not relation_terms:
+        return False
+    return bool(quote_tokens & relation_terms)
+
+
+def _edge_type_terms(edge_type: str) -> set[str]:
+    return {
+        "adapts": {"adapt", "adapts", "adapted", "apply", "applies", "applied", "application", "transfer", "port", "ports", "specializ", "specialize", "specializes", "specialized"},
+        "combines": {"combine", "combines", "combined", "integrate", "integrates", "integrated", "hybrid", "joint"},
+        "compares": {"compare", "compares", "compared", "versus", "vs", "baseline", "contrast"},
+        "enables": {"enable", "enables", "enabled", "support", "supports", "provide", "provides", "allow", "allows"},
+        "extends": {"extend", "extends", "extended", "augment", "augments", "build", "builds", "incorporate", "incorporates"},
+        "improves": {"advantage", "advantages", "compared", "efficient", "efficiency", "feasible", "faster", "better", "improve", "improves", "improved", "outperform", "outperforms", "enhance", "enhances"},
+        "operationalizes": {"operationalize", "operationalizes", "measure", "measures", "code", "codes", "annotate", "annotates", "detect", "detects", "extract", "extracts"},
+        "replaces": {"replace", "replaces", "replaced", "instead", "substitute", "substitutes", "supersede", "supersedes"},
+        "uses_component": {"use", "uses", "using", "based", "component", "module", "integrate", "integrates"},
+        "validates": {"assess", "assesses", "benchmark", "benchmarks", "evaluate", "evaluates", "finite", "performance", "replicate", "replicates", "study", "test", "tests", "validate", "validates", "validated"},
+    }.get(str(edge_type or ""), set())
+
+
+def _tokens(value: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", str(value or "").lower())
+    return [_normalize_token(token) for token in tokens if len(token) > 2]
+
+
+def _normalize_token(token: str) -> str:
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith("s") and len(token) > 3:
+        return token[:-1]
+    if token.endswith("ed") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("ing") and len(token) > 5:
+        return token[:-3]
+    return token
+
+
+def _weak_entity_tokens() -> set[str]:
+    return {
+        "analysis",
+        "base",
+        "data",
+        "evidence",
+        "method",
+        "model",
+        "practice",
+        "research",
+        "science",
+        "social",
+        "strategy",
+        "system",
+        "tooling",
+        "validation",
+    }

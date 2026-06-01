@@ -1,0 +1,8 @@
+id: system_json
+category: llm
+name: JSON System Prompt
+description: Default system instruction for JSON-only model calls.
+task_variables: []
+static_variables: []
+template: |
+  Return only a valid JSON object.

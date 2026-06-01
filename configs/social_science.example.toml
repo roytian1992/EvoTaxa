@@ -110,12 +110,29 @@ uses_component = ["uses", "borrows", "integrates"]
 compares = ["compares", "relative to"]
 
 [llm]
-# You can switch this to api_key = "token-abc123" for local private experiments.
+# Use EVOTAXA_LLM_API_KEY for local private experiments; do not commit literal API keys.
 provider = "openai_compat"
 model_name = "your-model-name"
 api_key_env = "EVOTAXA_LLM_API_KEY"
 base_url = "http://localhost:8001/v1"
 enabled_tasks = []
+
+[macro_patterns]
+enabled = true
+min_pattern_score = 0.2
+max_patterns = 20
+max_evidence_per_pattern = 8
+use_negative_evidence = true
+llm_summary_enabled = false
+
+[temporal_windows]
+enabled = true
+scope_types = ["global", "taxonomy_node", "entity_type", "relation_type"]
+min_documents_per_window = 2
+min_mentions_per_window = 3
+min_edges_per_window = 3
+min_duration_days = 1
+max_duration_days = 730
 
 [output]
 root = "../examples/social_smoke_output"

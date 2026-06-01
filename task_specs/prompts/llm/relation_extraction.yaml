@@ -1,0 +1,40 @@
+id: relation_extraction
+category: llm
+name: Relation Extraction
+description: Decide whether one entity pair expresses a schema-guided evolution relation.
+task_variables:
+  - name: pair
+    required: true
+  - name: relation_schema
+    required: true
+  - name: evidence_schema
+    required: true
+  - name: source_text
+    required: true
+  - name: target_text
+    required: true
+static_variables: []
+template: |
+  Decide whether this source-target entity pair expresses a taxonomy-guided evolution relation.
+  Use the relation schema as the closed set of allowed edge types. Prefer background or accept=false for weak co-mentions.
+  Candidate metadata contains retrieval evidence only; it is not enough by itself for acceptance.
+  Accept only when the provided source or target text quote-groundedly supports a concrete mechanism, adaptation, validation, comparison, component use, replacement, improvement, enablement, operationalization, or combination between the two named entities.
+  If accepted, return quote-grounded evidence for the selected relation's evidence slots. Every quote must be copied exactly from source or target text.
+  Evidence values must be objects, not strings: {"description": "...", "quote": "exact copied span"}.
+
+  Pair JSON:
+  {pair}
+
+  Allowed relation schema:
+  {relation_schema}
+
+  Evidence schema:
+  {evidence_schema}
+
+  Source text:
+  {source_text}
+
+  Target text:
+  {target_text}
+
+  Return JSON with accept, edge_type, confidence, evidence, rationale, and negative_rationale. evidence must be an object keyed by evidence slot, each with description and quote.

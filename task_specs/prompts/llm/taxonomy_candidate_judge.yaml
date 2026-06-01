@@ -1,0 +1,20 @@
+id: taxonomy_candidate_judge
+category: llm
+name: Taxonomy Candidate Judge
+description: Judge whether a taxonomy expansion candidate is valid.
+task_variables:
+  - name: candidate
+    required: true
+  - name: context
+    required: true
+static_variables: []
+template: |
+  Judge whether the following taxonomy expansion candidate is valid.
+
+  Candidate JSON:
+  {candidate}
+
+  Context:
+  {context}
+
+  Return JSON with accept, confidence, rationale, and suggested_label.

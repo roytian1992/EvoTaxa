@@ -1,0 +1,36 @@
+id: entity_extraction
+category: llm
+name: Entity Extraction
+description: Extract quote-grounded evolution-relevant entities from one document.
+task_variables:
+  - name: entity_schema
+    required: true
+  - name: max_entities
+    required: true
+  - name: doc_id
+    required: true
+  - name: title
+    required: true
+  - name: text
+    required: true
+static_variables: []
+template: |
+  Extract evolution-relevant entities from this document.
+  Each entity must fit one of the configured entity schema definitions below.
+  Return named analytical objects only: methods, data sources, measurement designs, models, tools, evaluation protocols, governance constraints, or other schema-defined objects that can participate in evolution relations.
+  The entity must be relevant to the domain of the document. Do not return a bare general-purpose AI/ML algorithm name unless the document uses it as a social-science method, measurement strategy, data practice, platform tool, or evaluation object.
+  When a term is a general technology or algorithm, preserve the concise canonical `name`, but use `contextual_name` and `domain_context` to say what it is used to study or measure in this social-science document, e.g. "GCN for noisy social-media text classification" rather than only "GCN" as the display context.
+  Reject generic nouns, discipline labels, paper-section phrases, incomplete sentence fragments, and broad taxonomy node labels.
+  Every entity must include an exact quote copied from the document text that supports the mention.
+  Prefer entities whose quote also exposes a social-science task, construct, population, platform, data source, governance issue, or evaluation setting.
+
+  Allowed entity schema:
+  {entity_schema}
+
+  Maximum entities: {max_entities}
+  Document id: {doc_id}
+  Title: {title}
+  Text:
+  {text}
+
+  Return JSON: {"entities": [{"name": "", "entity_type": "", "quote": "", "contextual_name": "", "domain_context": "", "method_role": "", "confidence": 0.0, "rationale": ""}]}.

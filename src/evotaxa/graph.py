@@ -114,6 +114,9 @@ def merge_llm_entity_mentions(
                     "name": name,
                     "entity_type": entity_type,
                     "quote": quote,
+                    "contextual_name": normalize_space(row.get("contextual_name") or ""),
+                    "domain_context": normalize_space(row.get("domain_context") or ""),
+                    "method_role": normalize_space(row.get("method_role") or ""),
                     "confidence": row.get("confidence"),
                     "status": status,
                     "reason": "quote_verified" if verified else "quote_not_verified_or_missing_name",
@@ -156,12 +159,17 @@ def build_edges(
 
     edges: dict[str, EvolutionEdge] = {}
     for node_id, local_entities in entities_by_node.items():
-        ordered = sorted(local_entities, key=lambda entity: (entity.first_seen_date or "9999", entity.entity_id))
+        ordered = _pairable_entities(local_entities, config)
         for source, target in itertools.permutations(ordered, 2):
             if source.entity_id == target.entity_id:
                 continue
-            pair_docs = _candidate_document_pairs(source, target, doc_map)
-            for source_doc, target_doc in pair_docs[: config.max_edge_candidates_per_entity]:
+            pair_docs = _candidate_document_pairs(
+                source,
+                target,
+                doc_map,
+                limit=config.max_edge_candidates_per_entity,
+            )
+            for source_doc, target_doc in pair_docs:
                 edge_type, cue, evidence_sentence = _infer_edge_type(source, target, source_doc, target_doc, config, relation_schema)
                 if edge_type == "background":
                     confidence = 0.35
@@ -202,29 +210,58 @@ def build_edges(
 def build_relation_extraction_pairs(
     docs: list[Document],
     entities: list[EvolutionEntity],
+    mentions: list[EntityMention],
     config: GraphConfig,
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
     doc_map = {doc.doc_id: doc for doc in docs}
+    mentions_by_entity_doc: dict[tuple[str, str], list[EntityMention]] = defaultdict(list)
+    for mention in mentions:
+        mentions_by_entity_doc[(mention.entity_id, mention.doc_id)].append(mention)
+
     entities_by_node: dict[str, list[EvolutionEntity]] = defaultdict(list)
     for entity in entities:
         for node_id in entity.taxonomy_nodes or ["__global__"]:
             entities_by_node[node_id].append(entity)
 
-    pairs: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
+    candidates: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
     for node_id, local_entities in entities_by_node.items():
-        ordered = sorted(local_entities, key=lambda entity: (entity.first_seen_date or "9999", entity.entity_id))
+        ordered = _pairable_entities(local_entities, config)
         for source, target in itertools.permutations(ordered, 2):
             if source.entity_id == target.entity_id:
                 continue
-            for source_doc, target_doc in _candidate_document_pairs(source, target, doc_map)[: config.max_edge_candidates_per_entity]:
-                key = (source.entity_id, target.entity_id, source_doc.doc_id, target_doc.doc_id, node_id)
-                if key in seen:
+            for source_doc, target_doc in _candidate_document_pairs(
+                source,
+                target,
+                doc_map,
+                limit=config.max_edge_candidates_per_entity,
+            ):
+                score, evidence = _relation_candidate_score(
+                    source=source,
+                    target=target,
+                    source_doc=source_doc,
+                    target_doc=target_doc,
+                    mentions_by_entity_doc=mentions_by_entity_doc,
+                    config=config,
+                )
+                if score < config.llm_relation_candidate_min_score:
                     continue
-                seen.add(key)
-                pairs.append(
+                key = (source.entity_id, target.entity_id, source_doc.doc_id, target_doc.doc_id)
+                existing = candidates.get(key)
+                if existing is not None:
+                    existing_score, existing_pair = existing
+                    if node_id != "__global__":
+                        nodes = set(existing_pair.get("taxonomy_nodes") or [])
+                        nodes.add(node_id)
+                        existing_pair["taxonomy_nodes"] = sorted(nodes)
+                    if score > existing_score:
+                        existing_pair["candidate_score"] = round(score, 3)
+                        existing_pair["candidate_evidence"] = evidence
+                        candidates[key] = (score, existing_pair)
+                    continue
+                candidates[key] = (
+                    score,
                     {
                         "source_entity": source.to_record(),
                         "target_entity": target.to_record(),
@@ -232,11 +269,13 @@ def build_relation_extraction_pairs(
                         "target_document": target_doc.doc_id,
                         "taxonomy_nodes": [] if node_id == "__global__" else [node_id],
                         "time_delta_days": _time_delta(source_doc.published_at, target_doc.published_at),
-                    }
+                        "candidate_score": round(score, 3),
+                        "candidate_evidence": evidence,
+                    },
                 )
-                if limit > 0 and len(pairs) >= limit:
-                    return pairs
-    return pairs
+    ordered_candidates = sorted(candidates.values(), key=lambda item: (-item[0], _pair_sort_key(item[1])))
+    pairs = [pair for _, pair in ordered_candidates]
+    return pairs[:limit] if limit > 0 else pairs
 
 
 def edge_from_relation_extraction(
@@ -289,6 +328,241 @@ def merge_edges_by_confidence(edges: list[EvolutionEdge]) -> list[EvolutionEdge]
         if existing is None or edge.confidence > existing.confidence:
             merged[edge.edge_id] = edge
     return sorted(merged.values(), key=lambda edge: (-edge.confidence, edge.edge_id))
+
+
+def _pairable_entities(entities: list[EvolutionEntity], config: GraphConfig) -> list[EvolutionEntity]:
+    ordered = sorted(
+        entities,
+        key=lambda entity: (
+            -len(entity.support_documents),
+            entity.first_seen_date or "9999",
+            entity.entity_id,
+        ),
+    )
+    if config.max_pair_groups_per_node > 0:
+        ordered = ordered[: config.max_pair_groups_per_node]
+    return sorted(ordered, key=lambda entity: (entity.first_seen_date or "9999", entity.entity_id))
+
+
+def _relation_candidate_score(
+    *,
+    source: EvolutionEntity,
+    target: EvolutionEntity,
+    source_doc: Document,
+    target_doc: Document,
+    mentions_by_entity_doc: dict[tuple[str, str], list[EntityMention]],
+    config: GraphConfig,
+) -> tuple[float, dict[str, Any]]:
+    source_target_mentions = mentions_by_entity_doc.get((source.entity_id, target_doc.doc_id), [])
+    target_mentions = mentions_by_entity_doc.get((target.entity_id, target_doc.doc_id), [])
+    same_doc_source_mentions = mentions_by_entity_doc.get((source.entity_id, source_doc.doc_id), [])
+    same_doc_target_mentions = mentions_by_entity_doc.get((target.entity_id, source_doc.doc_id), [])
+    source_in_target = bool(source_target_mentions) or _name_in_text(source, target_doc.full_text)
+    target_in_target = bool(target_mentions) or _name_in_text(target, target_doc.full_text)
+    source_in_source = bool(same_doc_source_mentions) or _name_in_text(source, source_doc.full_text)
+    target_in_source = bool(same_doc_target_mentions) or _name_in_text(target, source_doc.full_text)
+    same_document = source_doc.doc_id == target_doc.doc_id
+    target_relation_text = _relation_text(
+        source=source,
+        target=target,
+        doc=target_doc,
+        config=config,
+    )
+    source_relation_text = _relation_text(
+        source=source,
+        target=target,
+        doc=source_doc,
+        config=config,
+    ) if source_doc.doc_id != target_doc.doc_id else ""
+    direction_hint = _directional_relation_hint(
+        source=source,
+        target=target,
+        text=target_relation_text or target_doc.full_text,
+        config=config,
+    )
+    shared_nodes = sorted(set(source.taxonomy_nodes) & set(target.taxonomy_nodes))
+
+    score = 0.0
+    reasons: list[str] = []
+    if source_in_target and target_in_target:
+        score += 0.45
+        reasons.append("target_doc_mentions_both_entities")
+    elif same_document and source_in_source and target_in_source:
+        score += 0.4
+        reasons.append("same_doc_mentions_both_entities")
+    elif source_in_target:
+        score += 0.25
+        reasons.append("target_doc_mentions_source_entity")
+    if target_relation_text:
+        score += 0.35
+        reasons.append("target_doc_relation_cue_near_entity")
+    elif source_relation_text:
+        score += 0.18
+        reasons.append("source_doc_relation_cue_near_entity")
+    if direction_hint > 0:
+        score += 0.12
+        reasons.append("directional_cue_supports_source_to_target")
+    elif direction_hint < 0:
+        score -= 0.12
+        reasons.append("directional_cue_points_to_reverse_pair")
+    if same_document:
+        score += 0.12
+        reasons.append("same_document_pair")
+    if _entity_type_pair_is_plausible(source.entity_type, target.entity_type):
+        score += 0.08
+        reasons.append("plausible_entity_type_pair")
+    if len(shared_nodes) >= 2:
+        score += 0.05
+        reasons.append("multiple_shared_taxonomy_nodes")
+    delta = _time_delta(source_doc.published_at, target_doc.published_at)
+    if delta is not None and delta >= 0:
+        score += 0.05
+        reasons.append("chronology_ok")
+    if source.entity_type == "evaluation_protocol" and not source_in_target:
+        score -= 0.18
+        reasons.append("evaluation_source_not_in_target_doc")
+    if not (source_in_target or same_document):
+        score -= 0.22
+        reasons.append("no_source_evidence_in_target_doc")
+
+    evidence = {
+        "score_reasons": reasons,
+        "source_in_target_document": source_in_target,
+        "target_in_target_document": target_in_target,
+        "same_document": same_document,
+        "shared_taxonomy_node_count": len(shared_nodes),
+        "relation_quote": target_relation_text or source_relation_text,
+    }
+    return max(0.0, min(1.0, score)), evidence
+
+
+def _pair_sort_key(pair: dict[str, Any]) -> tuple[str, str, str, str]:
+    source = pair.get("source_entity") if isinstance(pair.get("source_entity"), dict) else {}
+    target = pair.get("target_entity") if isinstance(pair.get("target_entity"), dict) else {}
+    return (
+        str(pair.get("source_document") or ""),
+        str(pair.get("target_document") or ""),
+        str(source.get("entity_id") or ""),
+        str(target.get("entity_id") or ""),
+    )
+
+
+def _entity_type_pair_is_plausible(source_type: str, target_type: str) -> bool:
+    if not source_type or not target_type:
+        return False
+    if source_type == target_type:
+        return True
+    plausible_pairs = {
+        ("method", "method"),
+        ("method", "modeling_strategy"),
+        ("modeling_strategy", "method"),
+        ("modeling_strategy", "modeling_strategy"),
+        ("data_source", "method"),
+        ("data_source", "measurement_strategy"),
+        ("data_source", "modeling_strategy"),
+        ("measurement_strategy", "method"),
+        ("measurement_strategy", "measurement_strategy"),
+        ("infrastructure_tooling", "method"),
+        ("infrastructure_tooling", "measurement_strategy"),
+        ("infrastructure_tooling", "modeling_strategy"),
+        ("evaluation_protocol", "method"),
+        ("evaluation_protocol", "measurement_strategy"),
+        ("method", "evaluation_protocol"),
+        ("measurement_strategy", "evaluation_protocol"),
+        ("governance_practice", "method"),
+        ("governance_practice", "data_source"),
+    }
+    return (source_type, target_type) in plausible_pairs
+
+
+def _relation_text(
+    *,
+    source: EvolutionEntity,
+    target: EvolutionEntity,
+    doc: Document,
+    config: GraphConfig,
+) -> str:
+    source_names = _entity_surface_forms(source)
+    target_names = _entity_surface_forms(target)
+    cues = [cue.lower() for values in _relation_cues(config, None).values() for cue in values if str(cue).strip()]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", normalize_space(doc.full_text)) if part.strip()]
+    best = ""
+    for sentence in sentences:
+        low = sentence.lower()
+        has_source = any(name in low for name in source_names)
+        has_target = any(name in low for name in target_names)
+        has_cue = any(cue in low for cue in cues)
+        if has_source and has_target and has_cue:
+            return sentence[:500]
+        if not best and (has_source or has_target) and has_cue:
+            best = sentence[:500]
+    return best
+
+
+def _directional_relation_hint(
+    *,
+    source: EvolutionEntity,
+    target: EvolutionEntity,
+    text: str,
+    config: GraphConfig,
+) -> int:
+    source_names = _entity_surface_forms(source)
+    target_names = _entity_surface_forms(target)
+    directed_cues = [
+        cue.lower()
+        for edge_type, values in _relation_cues(config, None).items()
+        if edge_type not in {"background", "compares"}
+        for cue in values
+        if str(cue).strip()
+    ]
+    directed_cues.extend(
+        [
+            "adapts",
+            "applied to",
+            "based on",
+            "builds on",
+            "builds upon",
+            "extends",
+            "improves",
+            "incorporates",
+            "integrates",
+            "uses",
+        ]
+    )
+    sentences = [part.strip().lower() for part in re.split(r"(?<=[.!?])\s+", normalize_space(text)) if part.strip()]
+    for sentence in sentences:
+        source_pos = _first_surface_position(sentence, source_names)
+        target_pos = _first_surface_position(sentence, target_names)
+        if source_pos < 0 or target_pos < 0:
+            continue
+        low_pos = min(source_pos, target_pos)
+        high_pos = max(source_pos, target_pos)
+        cue_positions = [sentence.find(cue) for cue in directed_cues if cue in sentence]
+        cue_positions = [pos for pos in cue_positions if low_pos <= pos <= high_pos]
+        if not cue_positions:
+            continue
+        cue_pos = min(cue_positions)
+        if target_pos <= cue_pos <= source_pos:
+            return 1
+        if source_pos <= cue_pos <= target_pos:
+            return -1
+    return 0
+
+
+def _first_surface_position(text: str, names: list[str]) -> int:
+    positions = [text.find(name) for name in names if name and name in text]
+    positions = [pos for pos in positions if pos >= 0]
+    return min(positions) if positions else -1
+
+
+def _name_in_text(entity: EvolutionEntity, text: str) -> bool:
+    low = normalize_space(text).lower()
+    return any(name in low for name in _entity_surface_forms(entity))
+
+
+def _entity_surface_forms(entity: EvolutionEntity) -> list[str]:
+    values = [entity.canonical_name, *entity.aliases]
+    return [normalize_space(value).lower() for value in values if normalize_space(value)]
 
 
 def _initial_edge_evidence(
@@ -359,6 +633,10 @@ def _extracted_evidence(
         value = raw_evidence.get(slot) if isinstance(raw_evidence.get(slot), dict) else output.get(slot)
         if isinstance(value, dict):
             evidence[slot] = value
+        elif isinstance(raw_evidence.get(slot), str):
+            evidence[slot] = {"description": "", "quote": raw_evidence.get(slot)}
+        elif isinstance(value, str):
+            evidence[slot] = {"description": "", "quote": value}
         else:
             evidence[slot] = {"description": "", "quote": ""}
     for required in ["bottleneck", "mechanism", "tradeoff"]:
@@ -464,26 +742,31 @@ def _first_seen_date(docs: list[Document]) -> str:
     return dates[0].isoformat() if dates else ""
 
 
-def _candidate_document_pairs(source: EvolutionEntity, target: EvolutionEntity, doc_map: dict[str, Document]) -> list[tuple[Document, Document]]:
+def _candidate_document_pairs(
+    source: EvolutionEntity,
+    target: EvolutionEntity,
+    doc_map: dict[str, Document],
+    *,
+    limit: int | None = None,
+) -> list[tuple[Document, Document]]:
+    if limit is not None and limit <= 0:
+        return []
+    source_docs = _ordered_entity_documents(source, doc_map)
+    target_docs = _ordered_entity_documents(target, doc_map)
     pairs: list[tuple[Document, Document]] = []
-    for source_id in source.support_documents:
-        for target_id in target.support_documents:
-            source_doc = doc_map.get(source_id)
-            target_doc = doc_map.get(target_id)
-            if source_doc is None or target_doc is None:
-                continue
+    for target_doc in target_docs:
+        for source_doc in source_docs:
             if source_doc.published_at and target_doc.published_at and source_doc.published_at > target_doc.published_at:
                 continue
             pairs.append((source_doc, target_doc))
-    return sorted(
-        pairs,
-        key=lambda pair: (
-            pair[1].published_at or date.max,
-            pair[0].published_at or date.max,
-            pair[0].doc_id,
-            pair[1].doc_id,
-        ),
-    )
+            if limit is not None and len(pairs) >= limit:
+                return pairs
+    return pairs
+
+
+def _ordered_entity_documents(entity: EvolutionEntity, doc_map: dict[str, Document]) -> list[Document]:
+    docs = [doc_map[doc_id] for doc_id in entity.support_documents if doc_id in doc_map]
+    return sorted(docs, key=lambda doc: (doc.published_at or date.max, doc.doc_id))
 
 
 def _infer_edge_type(
