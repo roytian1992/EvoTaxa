@@ -223,6 +223,10 @@ PYTHONPATH=scripts:src python scripts/build_evolution_visualization.py \
 
 PYTHONPATH=scripts:src python scripts/build_evolution_insight_report.py \
   --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output
+
+python3 scripts/write_agentic_evolution_report.py \
+  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --config config.yaml
 ```
 
 Serve the dashboard locally:
@@ -317,6 +321,10 @@ Each run writes:
     case_study_report.md
     evolution_insight_report.md
     evolution_insight_report.summary.json
+    evolution_insight_report.agent.md
+    evolution_insight_report.agent.summary.json
+    evolution_insight_report.evidence_pack.json
+    evolution_insight_report.agent_trace.json
   state/
     evolution_state.json
     state_transitions.jsonl
@@ -423,12 +431,43 @@ Optional LLM summaries can be added later only as summaries of detector-backed e
 
 ## Evolution Insight Report
 
-`scripts/build_evolution_insight_report.py` generates a deterministic Markdown report from the materialized macro and micro artifacts. It reads `macro_patterns/pattern_profiles.jsonl`, `graph/successor_edges.accepted.jsonl`, `trajectory/successor_trajectories.jsonl`, `graph/entity_cards.jsonl`, and `corpus/documents.normalized.jsonl`, then writes:
+`scripts/build_evolution_insight_report.py` generates a deterministic evidence appendix from the materialized macro and micro artifacts. It reads `macro_patterns/pattern_profiles.jsonl`, `graph/successor_edges.accepted.jsonl`, `trajectory/successor_trajectories.jsonl`, `graph/entity_cards.jsonl`, and `corpus/documents.normalized.jsonl`, then writes:
 
 - `reports/evolution_insight_report.md`
 - `reports/evolution_insight_report.summary.json`
 
-The report is designed for presentation and audit. It includes a run summary, cross-scale findings, per-pattern macro profiles, representative micro evidence with quotes, relation/type/year distributions, local branching and convergence tables, and a macro-micro synthesis section. It does not call an LLM by default.
+That deterministic file is meant as the audit substrate, not the final story. For a more readable research report, use `scripts/write_agentic_evolution_report.py`. It builds an evidence pack and then runs a multi-step writing agent:
+
+1. `scout`: identify candidate story lines and weak claims.
+2. `outline`: choose a narrative structure.
+3. `draft`: write the report from evidence anchors.
+4. `critic`: flag unsupported claims, table-like writing, and overclaims.
+5. `revise`: produce the final Markdown report.
+
+The agentic report writes:
+
+- `reports/evolution_insight_report.agent.md`
+- `reports/evolution_insight_report.agent.summary.json`
+- `reports/evolution_insight_report.evidence_pack.json`
+- `reports/evolution_insight_report.agent_trace.json`
+
+Example local `config.yaml`:
+
+```yaml
+llm:
+  base_url: http://127.0.0.1:8001/v1
+  model: Qwen3-235B-FP8
+  api_key_env: EVOTAXA_LLM_API_KEY
+  temperature: 0.2
+  top_p: 0.8
+  timeout_seconds: 180
+  max_retries: 2
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+```
+
+The report agent does not invent macro patterns, edges, trajectories, nodes, quotes, or years. It can only turn the evidence pack into a clearer argument and must preserve caveats for weak evidence.
 
 ## Taxonomy-Graph Co-Evolution
 

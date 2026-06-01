@@ -33,6 +33,7 @@ from extract_successor_edges import build_successor_candidates  # noqa: E402
 from materialize_evolution_artifacts import build_successor_trajectories, is_successor_edge  # noqa: E402
 from filter_successor_edges import strict_rejection_reason  # noqa: E402
 from build_evolution_insight_report import build_evolution_insight_report  # noqa: E402
+from write_agentic_evolution_report import build_evidence_pack, build_planned_prompts, parse_minimal_mapping  # noqa: E402
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -1334,6 +1335,119 @@ def test_evolution_insight_report_links_macro_and_micro_artifacts(tmp_path: Path
     assert "zero-shot annotation reduces the need for manual coding" in text
     assert "## 宏观-微观合成解读" in text
     assert report["summary"]["strict_successor_edges"] == 1
+
+
+def test_agentic_evolution_report_builds_evidence_pack_and_prompts(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    for rel in ["corpus", "graph", "trajectory", "macro_patterns"]:
+        (run_root / rel).mkdir(parents=True)
+    (run_root / "manifest.json").write_text(
+        json.dumps({"project": {"name": "Fixture CSS", "run_id": "agentic_fixture"}, "counts": {"documents": 2}}),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        run_root / "corpus" / "documents.normalized.jsonl",
+        [
+            {"doc_id": "D1", "title": "Manual coding", "published_at": "2020-01-01", "text": "manual coding"},
+            {"doc_id": "D2", "title": "Zero-shot annotation", "published_at": "2024-01-01", "text": "zero-shot annotation"},
+        ],
+    )
+    _write_jsonl(
+        run_root / "graph" / "entity_cards.jsonl",
+        [
+            {"entity_id": "measurement_strategy__manual_coding", "display_name": "manual coding"},
+            {"entity_id": "method__zero_shot_annotation", "display_name": "zero-shot annotation"},
+        ],
+    )
+    edge_id = "replaces__measurement_strategy_manual_coding__method_zero_shot_annotation__d2"
+    _write_jsonl(
+        run_root / "graph" / "successor_edges.accepted.jsonl",
+        [
+            {
+                "edge_id": edge_id,
+                "source_entity": "measurement_strategy__manual_coding",
+                "target_entity": "method__zero_shot_annotation",
+                "edge_type": "replaces",
+                "schema_group": "analytic_method",
+                "source_entity_type": "measurement_strategy",
+                "target_entity_type": "method",
+                "source_document": "D1",
+                "target_document": "D2",
+                "time_delta_days": 1461,
+                "confidence": 0.91,
+                "evidence": {"mechanism": {"quote": "zero-shot annotation reduces the need for manual coding"}},
+            }
+        ],
+    )
+    _write_jsonl(
+        run_root / "trajectory" / "successor_trajectories.jsonl",
+        [
+            {
+                "trajectory_id": "successor_trajectory__000001",
+                "entity_labels": ["manual coding", "zero-shot annotation"],
+                "edge_path": [edge_id],
+                "edge_types": ["replaces"],
+                "trajectory_score": 0.91,
+                "path_length": 1,
+            }
+        ],
+    )
+    _write_jsonl(
+        run_root / "macro_patterns" / "pattern_profiles.jsonl",
+        [
+            {
+                "pattern_id": "substitution",
+                "pattern_label": "Substitution",
+                "pattern_score": 0.9,
+                "time_span": "2024",
+                "insight": "替代由 strict successor evidence 支撑。",
+                "dominant_relations": [{"value": "replaces", "count": 1, "share": 1.0}],
+                "representative_evidence": [
+                    {
+                        "artifact_type": "successor_edge",
+                        "artifact_id": edge_id,
+                        "path": "manual coding -> zero-shot annotation",
+                        "relation": "replaces",
+                        "edge_ids": [edge_id],
+                    }
+                ],
+            }
+        ],
+    )
+    _write_jsonl(run_root / "macro_patterns" / "pattern_timeline.jsonl", [{"pattern_id": "substitution", "time_slice": "2024"}])
+    deterministic = build_evolution_insight_report(run_root=run_root)
+    pack = build_evidence_pack(
+        run_root=run_root,
+        deterministic_summary=deterministic["summary"],
+        max_patterns=3,
+        max_evidence_per_pattern=3,
+        max_micro_examples=3,
+        quote_chars=180,
+    )
+    prompts = build_planned_prompts(evidence_pack=pack, style="research_memo")
+    assert pack["macro_patterns"][0]["pattern_id"] == "substitution"
+    assert pack["micro_evidence"]["replacement_edges"][0]["edge_id"] == edge_id
+    assert "zero-shot annotation reduces the need for manual coding" in json.dumps(pack, ensure_ascii=False)
+    assert "不要堆统计表" in prompts["scout"]
+    assert "最终中文 Markdown" in prompts["revise"]
+
+
+def test_agentic_report_minimal_yaml_config_parser() -> None:
+    parsed = parse_minimal_mapping(
+        """
+        llm:
+          base_url: http://127.0.0.1:8001/v1
+          model: Qwen3-235B-FP8
+          api_key_env: EVOTAXA_LLM_API_KEY
+          temperature: 0.2
+          extra_body:
+            chat_template_kwargs:
+              enable_thinking: false
+        """
+    )
+    assert parsed["llm"]["model"] == "Qwen3-235B-FP8"
+    assert parsed["llm"]["temperature"] == 0.2
+    assert parsed["llm"]["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
 
 
 def test_quote_grounded_llm_entity_mentions_are_merged() -> None:

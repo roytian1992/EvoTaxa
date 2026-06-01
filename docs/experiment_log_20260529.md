@@ -1044,3 +1044,48 @@ PYTHONPATH=src python -m evotaxa.cli run-full --config configs/social_science.ex
 - Current state:
   - The report is suitable as the first static narrative artifact for the current CSS run.
   - It is still bounded by the strict successor artifacts; missing or weak successor edges will appear as missing narrative coverage rather than being filled by the report generator.
+
+#### Follow-up at 2026-06-01 21:49 CST - Agentic Narrative Insight Report
+
+- Goal: Replace the table-like deterministic report as the presentation artifact with an LLM-agent-written research memo, while preserving a deterministic evidence appendix for audit.
+- Starting point: The previous `evolution_insight_report.md` correctly summarized 4,126 documents, 8,122 entity cards, 832 strict successor edges, 995 successor trajectories, 9 macro patterns, and 391 timeline rows, but read too much like a dashboard export.
+- Code changes:
+  - Added `scripts/write_agentic_evolution_report.py`.
+  - Added report prompts under `task_specs/prompts/reports/` for a five-step writing agent: `scout`, `outline`, `draft`, `critic`, and `revise`.
+  - The agent first builds `reports/evolution_insight_report.evidence_pack.json` from macro profiles, accepted successor edges, trajectories, cards, and document metadata.
+  - It then writes `reports/evolution_insight_report.agent.md`, `reports/evolution_insight_report.agent.summary.json`, and `reports/evolution_insight_report.agent_trace.json`.
+  - `scripts/build_evolution_insight_report.py` now avoids importing the full `evotaxa` package so the deterministic evidence appendix can run in a minimal Python environment without `PyYAML`.
+  - `.gitignore` now excludes local `config.yaml` files; the generated local config uses `api_key_env` and does not store literal API keys in tracked files.
+  - README now distinguishes the deterministic evidence appendix from the agentic narrative report and documents the local `config.yaml` shape.
+- Commands:
+  ```bash
+  python3 scripts/write_agentic_evolution_report.py \
+    --run-root data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output \
+    --dry-run \
+    --max-patterns 9 \
+    --max-evidence-per-pattern 8 \
+    --max-micro-examples 10
+
+  EVOTAXA_LLM_API_KEY=... python3 scripts/write_agentic_evolution_report.py \
+    --run-root data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output \
+    --config config.yaml \
+    --max-patterns 9 \
+    --max-evidence-per-pattern 8 \
+    --max-micro-examples 10
+  ```
+- Outputs:
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent.md`
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent.summary.json`
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.evidence_pack.json`
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.agent_trace.json`
+- Verified facts:
+  - The final run used `Qwen3-235B-FP8` at `http://127.0.0.1:8001/v1` with `enable_thinking=false` through `chat_template_kwargs`.
+  - Agent trace completed all five steps: scout, outline, draft, critic, and revise.
+  - Final report length is 4,644 characters / 87 lines.
+  - The final report has no emoji-like decoration and all extracted edge anchors in the report resolve to accepted successor edges.
+  - The report is now organized around interpretable claims: LLM substitution discourse, evaluation-protocol institutionalization, cross-context adaptation, limits of paradigm-shift claims, and next audit actions.
+- Environment caveat:
+  - The active system Python lacks `pytest`, `PyYAML`, `json_repair`, and `pip`; script-level `py_compile`, dry-run generation, and live Qwen report generation were verified in this minimal environment.
+- Current state:
+  - The report is much closer to a research memo than a numeric summary.
+  - It remains bounded by the current successor artifacts and should be treated as an evidence-grounded narrative draft, not a final social-science conclusion.

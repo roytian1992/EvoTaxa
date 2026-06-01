@@ -6,3 +6,7 @@ examples/*_output/
 examples/*_output_ablations/
 examples/*_smoke_output/
 data/
+config.yaml
+config.yml
+local_config.yaml
+local_config.yml
