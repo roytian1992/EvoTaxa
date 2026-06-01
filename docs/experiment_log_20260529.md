@@ -1012,3 +1012,35 @@ PYTHONPATH=src python -m evotaxa.cli run-full --config configs/social_science.ex
   - `git diff --cached --check` passed.
   - `data/` remains ignored and was not staged.
   - Literal local API keys were removed from tracked/staged files; local LLM commands now use the `EVOTAXA_LLM_API_KEY` placeholder.
+
+#### Follow-up at 2026-06-01 16:49 CST - Evolution Insight Report Generator
+
+- Goal: Add a reproducible Markdown report that turns macro-pattern profiles and micro successor evidence into an inspectable, presentation-ready evolution insight document.
+- Starting point: Current CSS run output already contained 4,126 screened core documents, 8,122 entity cards, 832 strict successor edges, 995 successor trajectories, 9 macro pattern profiles, and 391 macro timeline rows.
+- Code changes:
+  - Added `scripts/build_evolution_insight_report.py`.
+  - The script reads `manifest.json`, `corpus/documents.normalized.jsonl`, `graph/entity_cards.jsonl`, `graph/successor_edges.accepted.jsonl`, `trajectory/successor_trajectories.jsonl`, `macro_patterns/pattern_profiles.jsonl`, and `macro_patterns/pattern_timeline.jsonl`.
+  - It writes `reports/evolution_insight_report.md` and `reports/evolution_insight_report.summary.json`, and updates manifest layout/counts unless `--no-manifest-update` is set.
+  - Report sections include run boundary notes, main findings, per-pattern macro profiles, representative micro evidence with quotes, relation/type/year distributions, local branching and convergence tables, long-gap/replacement/cross-type edge examples, successor trajectories, and macro-micro synthesis.
+  - Updated README with the report-generation command, output layout, and report semantics.
+  - Added a smoke test fixture that links one macro substitution profile to a strict successor edge and trajectory.
+- Command:
+  ```bash
+  PYTHONPATH=scripts:src python scripts/build_evolution_insight_report.py \
+    --run-root data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output \
+    --max-patterns 9 \
+    --max-evidence-per-pattern 5 \
+    --max-micro-examples 8
+  ```
+- Outputs:
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.md`
+  - `data/schema_probe/css_screened_20260530_v2/mainflow_proposal/full_llm_nodes_4126_20260530/run_output/reports/evolution_insight_report.summary.json`
+- Verified facts:
+  - Summary JSON reports 4,126 documents, 8,122 entity cards, 832 strict successor edges, 995 successor trajectories, 9 macro patterns, and 391 timeline rows.
+  - Top reported patterns are substitution, institutionalization, recontextualization, hybridization, differentiation, convergence, cyclical return, stabilization, and fragmentation.
+  - Top relation types are extends 355, specializes 141, adapts 117, improves 96, generalizes 95, and replaces 28.
+  - Top type transitions are method -> method 210, measurement_strategy -> method 87, modeling_strategy -> modeling_strategy 86, modeling_strategy -> method 85, method -> modeling_strategy 79, and measurement_strategy -> measurement_strategy 77.
+  - The generator is deterministic and does not call an LLM; quoted evidence is excerpted from already accepted successor edges.
+- Current state:
+  - The report is suitable as the first static narrative artifact for the current CSS run.
+  - It is still bounded by the strict successor artifacts; missing or weak successor edges will appear as missing narrative coverage rather than being filled by the report generator.

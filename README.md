@@ -220,6 +220,9 @@ PYTHONPATH=scripts:src python scripts/build_evolution_visualization.py \
   --max-nodes 1600 \
   --max-edges 1200 \
   --max-trajectories 1000
+
+PYTHONPATH=scripts:src python scripts/build_evolution_insight_report.py \
+  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output
 ```
 
 Serve the dashboard locally:
@@ -310,6 +313,10 @@ Each run writes:
   visualization/
     evolution_dashboard.html
     evolution_dashboard.summary.json
+  reports/
+    case_study_report.md
+    evolution_insight_report.md
+    evolution_insight_report.summary.json
   state/
     evolution_state.json
     state_transitions.jsonl
@@ -321,8 +328,6 @@ Each run writes:
     taxonomy_graph_feedback.jsonl
   evaluation/
     quality_report.json
-  reports/
-    case_study_report.md
   audit/
     llm_judge_records.jsonl
     llm_cache.jsonl
@@ -415,6 +420,15 @@ The successor-artifact macro pass detects differentiation, convergence, hybridiz
 - `representative_evidence`: links back to concrete successor edges and trajectories.
 
 Optional LLM summaries can be added later only as summaries of detector-backed evidence.
+
+## Evolution Insight Report
+
+`scripts/build_evolution_insight_report.py` generates a deterministic Markdown report from the materialized macro and micro artifacts. It reads `macro_patterns/pattern_profiles.jsonl`, `graph/successor_edges.accepted.jsonl`, `trajectory/successor_trajectories.jsonl`, `graph/entity_cards.jsonl`, and `corpus/documents.normalized.jsonl`, then writes:
+
+- `reports/evolution_insight_report.md`
+- `reports/evolution_insight_report.summary.json`
+
+The report is designed for presentation and audit. It includes a run summary, cross-scale findings, per-pattern macro profiles, representative micro evidence with quotes, relation/type/year distributions, local branching and convergence tables, and a macro-micro synthesis section. It does not call an LLM by default.
 
 ## Taxonomy-Graph Co-Evolution
 
