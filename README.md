@@ -128,10 +128,14 @@ enabled_tasks = [
   "relation_schema_inference",
   "entity_evidence_schema_inference",
 ]
+
+[llm.extra_body.chat_template_kwargs]
+enable_thinking = false
 ```
 
 For committed configs, prefer `api_key_env` instead of a literal token.
 Set `enabled_tasks = []` to disable model calls by default, or `enabled_tasks = ["*"]` to allow every LLM-backed task.
+For extraction, screening, and structured judge tasks, keep `enable_thinking = false`; these tasks need compact JSON more than hidden reasoning. For deep analytic writing or theory-review tasks, use a separate local config and enable thinking only when the extra latency is acceptable.
 
 For adaptive schema work, also enable `relation_schema_inference`, `entity_evidence_schema_inference`, and `schema_revision_judge`.
 
@@ -146,6 +150,9 @@ python -m evotaxa.cli run-full \
 ## Large-Corpus Social-Science Workflow
 
 The OpenAlex computational-social-science workflow is the current large-corpus reference path. It keeps expensive, domain-specific steps outside the default `run-full` command so each stage is auditable and resumable.
+The current baseline is title/abstract based. Full-text acquisition, storage,
+section extraction, and future incremental refresh rules are specified in
+[docs/fulltext_literature_management.md](docs/fulltext_literature_management.md).
 
 1. Download a corpus with resumable OpenAlex paging:
 
@@ -159,8 +166,8 @@ python scripts/download_openalex_corpus.py \
 ```bash
 export EVOTAXA_LLM_API_KEY=...
 python scripts/screen_relevance.py \
-  --input data/computational_social_science/corpus.jsonl \
-  --output-root data/computational_social_science_screening/<run_id> \
+  --input data/computational_social_science_methods/raw/corpus.jsonl \
+  --output-root data/computational_social_science_methods/screening/<run_id> \
   --rubric configs/relevance_domains/computational_social_science_methods.toml \
   --llm-config configs/llm/qwen_local.toml \
   --resume
@@ -171,14 +178,14 @@ python scripts/screen_relevance.py \
 ```bash
 PYTHONPATH=src python scripts/probe_schema_design.py \
   --config configs/computational_social_science_methods.openalex.toml \
-  --output-root data/schema_probe/<probe_id> \
+  --output-root runs/computational_social_science_methods/evolution/<probe_id> \
   --sample-size 240 \
   --seed 20260530
 
 PYTHONPATH=src python scripts/propose_schema_from_probe.py \
   --base-config configs/computational_social_science_methods.openalex.toml \
-  --probe-root data/schema_probe/<probe_id> \
-  --output-root data/schema_probe/<probe_id>/mainflow_proposal
+  --probe-root runs/computational_social_science_methods/evolution/<probe_id> \
+  --output-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal
 ```
 
 4. Run the main entity/state pipeline from the proposed config, then run successor extraction over the resulting entity cards. Successor extraction is resumable and supports parallel workers:
@@ -186,9 +193,9 @@ PYTHONPATH=src python scripts/propose_schema_from_probe.py \
 ```bash
 export EVOTAXA_LLM_API_KEY=...
 PYTHONPATH=scripts:src python scripts/extract_successor_edges.py \
-  --config data/schema_probe/<probe_id>/mainflow_proposal/<successor_config>.json \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
-  --output-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/successor_run \
+  --config runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<successor_config>.json \
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --output-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/successor_run \
   --candidate-limit 0 \
   --llm-limit <candidate_count> \
   --candidate-scope schema_group \
@@ -204,28 +211,28 @@ Use `--candidate-limit 0` to keep all generated candidates. Set `--llm-limit` to
 
 ```bash
 PYTHONPATH=scripts:src python scripts/filter_successor_edges.py \
-  --input-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/successor_run \
-  --output-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/successor_run/strict_final \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --input-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/successor_run \
+  --output-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/successor_run/strict_final \
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output \
   --install
 
 PYTHONPATH=scripts:src python scripts/materialize_evolution_artifacts.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output
 
 PYTHONPATH=scripts:src python scripts/synthesize_successor_macro_patterns.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output
 
 PYTHONPATH=scripts:src python scripts/build_evolution_visualization.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output \
   --max-nodes 1600 \
   --max-edges 1200 \
   --max-trajectories 1000
 
 PYTHONPATH=scripts:src python scripts/build_evolution_insight_report.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output
 
 python3 scripts/write_agentic_evolution_report.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output \
   --config config.yaml
 ```
 
@@ -233,7 +240,7 @@ Serve the dashboard locally:
 
 ```bash
 python scripts/serve_evolution_dashboard.py \
-  --run-root data/schema_probe/<probe_id>/mainflow_proposal/<run_id>/run_output \
+  --run-root runs/computational_social_science_methods/evolution/<probe_id>/mainflow_proposal/<run_id>/run_output \
   --port 8765
 ```
 
@@ -411,9 +418,23 @@ For large corpora, EvoTaxa separates generic relation extraction from strict suc
 
 `scripts/build_evolution_visualization.py` and `scripts/serve_evolution_dashboard.py` provide a local browser for the current run. The browser defaults to time-windowed strict successor evidence, supports month-level zoom, shows older concepts above newer concepts, exposes node cards and edge evidence, and lets macro patterns select their linked micro-level evidence.
 
+For large runs, the main interpretation layers are:
+
+- `graph/method_edges.*.jsonl`: generic relation artifacts from the core pipeline. They are useful for audit, scoring, and fallback hooks, but should not be treated as the primary evolution browser when strict successor edges are available.
+- `graph/successor_edges.accepted.jsonl`: high-precision predecessor-to-successor claims. These are the preferred substrate for the dashboard, node-card lineage, successor trajectories, and successor-based macro patterns.
+- `graph/entity_cards.jsonl`: inspectable concept cards with display names, contextual names, schema groups, supporting documents, mentions, and successor neighborhoods.
+- `trajectory/successor_trajectories.jsonl`: composed successor paths over strict edges. These support local lineage reading rather than broad co-mention search.
+- `macro_patterns/*.jsonl`: detector-backed higher-level summaries over successor edges, successor trajectories, entity cards, and timeline evidence.
+- `reports/evolution_insight_report.*`: deterministic and optional agentic reports built from evidence packs. Report text should preserve evidence caveats and should not invent nodes, edges, quotes, years, or macro patterns.
+- `evaluation/quality_report.json`: intrinsic health metrics for taxonomy, entity quality, edge evidence, co-evolution, hooks, and LLM reliability.
+
 ## Macro Pattern Synthesis
 
 The macro layer is optional. It should only be interpreted after entity cards and successor trajectories are stable for a real corpus.
+The pattern definitions are versioned in [docs/macro_pattern_ontology.md](docs/macro_pattern_ontology.md).
+They should be read as a first operational macro-pattern ontology, not as a final or exhaustive theory of field evolution.
+The longer-term technical roadmap for defensible method-evolution mining is in
+[docs/method_evolution_mining_technical_roadmap.md](docs/method_evolution_mining_technical_roadmap.md).
 
 Two implementations exist:
 
@@ -421,6 +442,18 @@ Two implementations exist:
 - `scripts/synthesize_successor_macro_patterns.py`: a successor-artifact macro synthesis pass for runs that have strict successor edges and materialized node cards.
 
 The successor-artifact macro pass detects differentiation, convergence, hybridization, recontextualization, cyclical return, institutionalization, substitution, fragmentation, and stabilization. It does not let an LLM create pattern IDs, scores, nodes, trajectories, or evidence from scratch. Current profile rows include:
+
+| Pattern | Short meaning | Typical detector signals |
+|---|---|---|
+| `differentiation` | A broad domain region, method, evidence object, or practice branches into more specific successor lines. | Specialized successors, outgoing split structure, taxonomy split evidence, `specializes` edges. |
+| `convergence` | Previously separate lines feed into a shared successor, method family, evidence target, or evaluative frame. | Multiple incoming successors to one target, `generalizes` edges, cross-line trajectories ending in a shared entity. |
+| `hybridization` | A successor combines multiple roles, methods, data practices, measurement strategies, models, or governance components. | Cross-type trajectories, model-measurement-data coupling, mixed entity roles within one coherent schema group. |
+| `recontextualization` | A method, model, measurement practice, data practice, or frame is adapted into a new empirical, platform, population, governance, or task context. | `adapts` edges, context shifts between entity cards, taxonomy-local transfer evidence. |
+| `cyclical_return` | An earlier concept, method, or practice reappears after a meaningful gap because new data, models, infrastructures, or problems make it useful again. | Long-span trajectories, revived older entities, renewed use with changed context. |
+| `institutionalization` | A method or practice becomes embedded in evaluation, governance, benchmarking, reproducibility, audit, access, or protocol routines. | Benchmark, protocol, reproducibility, audit, governance, data-access, or evaluation signals. |
+| `substitution` | A newer method, model, measurement strategy, data practice, or protocol is framed as replacing or reducing the need for an older one. | `replaces` edges and quote evidence with displacement cues rather than comparison-only language. |
+| `fragmentation` | A local field area disperses into multiple weakly connected successor branches without a dominant synthesis point. | High outgoing branching, diverse successors, weak cross-branch integration, no dominant convergence target. |
+| `stabilization` | Relations, trajectories, taxonomy states, or schema constraints are coherent and evidence-backed enough to be treated as stable local structure. | High-confidence strict edges, coherent trajectories, quote grounding, schema fit, low rejection pressure. |
 
 - `insight`: corpus-specific pattern reading.
 - `analytic_note`: which detectors drove the profile.
@@ -458,7 +491,7 @@ Example local `config.yaml`:
 ```yaml
 llm:
   base_url: http://127.0.0.1:8001/v1
-  model: Qwen3-235B-FP8
+  model: Qwen3.5-397B-A17B-FP8
   api_key_env: EVOTAXA_LLM_API_KEY
   temperature: 0.2
   top_p: 0.8
