@@ -248,109 +248,28 @@ The dashboard is a local inspection tool. It uses only strict successor edges fo
 
 ## Output Layout
 
-Each run writes:
+Each run writes a `manifest.json` plus a small set of domain-specific artifact directories under the configured `output.root`. The exact file set depends on the enabled modules, but the stable layout is:
 
 ```text
 <output_root>/
-  corpus/
-    documents.normalized.jsonl
-    manifest.json
-  taxonomy/
-    taxonomy_nodes.enriched.json
-    taxonomy_nodes.expanded.json
-    taxonomy_events.jsonl
-    taxonomy_induction_audit.jsonl
-    expansion_trigger_scores.jsonl
-    expansion_candidates.jsonl
-    expansion_application_report.jsonl
-    revision_candidates.jsonl
-    revision_application_report.jsonl
-    coevolution_iterations.jsonl
-    node_quality_scores.jsonl
-    taxonomy_judge_report.json
-    document_assignments.normalized.jsonl
-  schema/
-    entity_schema.fixed.json
-    entity_schema.inferred.json
-    entity_schema.final.json
-    entity_schema.revisions.jsonl
-    relation_schema.fixed.json
-    relation_schema.inferred.json
-    relation_schema.final.json
-    relation_schema.revisions.jsonl
-    evidence_schema.fixed.json
-    evidence_schema.inferred.json
-    evidence_schema.final.json
-    evidence_schema.revisions.jsonl
-    schema_revision_candidates.jsonl
-    schema_reports.jsonl
-  graph/
-    method_registry.jsonl
-    method_aliases.jsonl
-    entity_linking_report.jsonl
-    entity_quality_report.jsonl
-    llm_entity_mentions.jsonl
-    paper_method_mentions.jsonl
-    relation_extraction_report.jsonl
-    relation_rejections.jsonl
-    method_edges.paper_level.jsonl
-    method_edges.trusted.jsonl
-    method_edges.candidate.jsonl
-    method_edges.unverified.jsonl
-    edge_scores.jsonl
-    method_edges.aggregated.jsonl
-    method_edges.all_aggregated.jsonl
-    edge_evidence_audit.jsonl
-    method_evidence_records.jsonl
-    entity_summary.json
-    entity_cards.jsonl
-    successor_edges.accepted.jsonl
-  search/
-    evolution_chains.jsonl
-    branch_points.jsonl
-  trajectory/
-    evolution_trajectories.jsonl
-    successor_trajectories.jsonl
-    trajectory_eval.jsonl
-  macro_patterns/
-    pattern_profiles.jsonl
-    pattern_evidence.jsonl
-    pattern_timeline.jsonl
-    pattern_summary.json
-  temporal_windows/
-    micro_windows.jsonl
-    micro_window_assignments.jsonl
-    temporal_window_summary.json
-  visualization/
-    evolution_dashboard.html
-    evolution_dashboard.summary.json
-  reports/
-    case_study_report.md
-    evolution_insight_report.md
-    evolution_insight_report.summary.json
-    evolution_insight_report.agent.md
-    evolution_insight_report.agent.summary.json
-    evolution_insight_report.evidence_pack.json
-    evolution_insight_report.reader_evidence_pack.json
-    evolution_insight_report.agent_trace.json
-  state/
-    evolution_state.json
-    state_transitions.jsonl
-  hooks/
-    forecast_hooks.jsonl
-    social_analysis_hooks.jsonl
-    hook_score_report.json
-  feedback/
-    taxonomy_graph_feedback.jsonl
-  evaluation/
-    quality_report.json
-  audit/
-    llm_judge_records.jsonl
-    llm_cache.jsonl
-    unverified_edges.jsonl
-    low_confidence_nodes.jsonl
+  corpus/            normalized documents and corpus manifest
+  taxonomy/          enriched, induced, expanded, and revised taxonomy artifacts
+  schema/            fixed/inferred/final entity, relation, and evidence schemas
+  graph/             entities, links, edge evidence, strict successors, and audits
+  trajectory/        inferred evolution trajectories and successor trajectories
+  macro_patterns/    detector-backed macro pattern profiles and evidence
+  temporal_windows/  optional temporal windows and time-series signals
+  visualization/     local dashboard HTML and dashboard summary
+  reports/           deterministic and optional agentic evolution reports
+  state/             explicit evolution state and state transitions
+  hooks/             forecast and social-analysis hooks
+  feedback/          taxonomy-graph feedback events
+  evaluation/        intrinsic run quality report
+  audit/             LLM records, cache, and low-confidence artifacts
   manifest.json
 ```
+
+For large-corpus inspection, the files most users need first are `manifest.json`, `graph/entity_cards.jsonl`, `graph/successor_edges.accepted.jsonl`, `trajectory/successor_trajectories.jsonl`, `macro_patterns/pattern_profiles.jsonl`, `visualization/evolution_dashboard.html`, and `reports/evolution_insight_report.agent.md`.
 
 ## Config Sections
 
