@@ -16,6 +16,18 @@ The core idea is to model a domain as an evolving state, not just as a flat set 
 
 For large social-science corpora, the current recommended workflow is staged: collect or normalize the corpus, run optional LLM relevance screening and abstract cleaning, probe the corpus-driven schema, run the main entity/state pipeline, extract strict successor edges, materialize node cards and trajectories, synthesize optional macro patterns, and inspect the result in the local evolution dashboard.
 
+## Method Overview
+
+EvoTaxa is designed around micro-evidence first, then higher-level interpretation. It does not infer field evolution from topic frequency or co-mention structure alone. The pipeline generates typed candidates, checks whether relation evidence is grounded in source text, separates trusted/candidate/unverified relations, and only then builds state, trajectory, dashboard, and macro-pattern artifacts.
+
+The method has three practical layers:
+
+- **Core pipeline**: normalizes a corpus, resolves or induces taxonomy nodes, assigns documents to taxonomy regions, extracts and links entities, resolves entity/relation/evidence schemas, builds schema-constrained relation candidates, audits quote evidence, scores and stratifies edges, records state transitions, and evaluates run quality.
+- **Adaptive feedback**: uses failed quotes, weak relations, filtered entities, negative relation evidence, and taxonomy-graph feedback to propose bounded schema and taxonomy revisions. These revisions are auditable artifacts, not silent rewrites of the corpus.
+- **Large-corpus successor layer**: for noisy or broad social-science corpora, strict predecessor-to-successor extraction is run after the core entity/state pipeline. This layer materializes node cards, applies temporal, schema-group, confidence, and evidence filters, and provides the preferred graph for dashboards, successor trajectories, macro patterns, and reader-facing reports.
+
+This separation matters: `graph/method_edges.*.jsonl` records generic relation extraction from the core pipeline, while `graph/successor_edges.accepted.jsonl` records high-precision evolution claims suitable for visual interpretation. Macro patterns and reports summarize detector-backed micro evidence; they should not be read as free-standing theoretical claims.
+
 ## Algorithm Flow
 
 ![EvoTaxa overall architecture](assets/overall_architecture.png)
@@ -31,10 +43,12 @@ corpus
   -> schema-guided relation extraction
   -> quote-grounded evidence audit
   -> edge scoring and trusted/candidate/unverified stratification
-  -> taxonomy-graph co-evolution
   -> adaptive schema revision with negative evidence
+  -> taxonomy-graph feedback and optional co-evolution
   -> evolution state snapshot and state transitions
   -> trajectory inference and trajectory evaluation
+  -> optional strict successor extraction for large corpora
+  -> macro-pattern synthesis from detector-backed micro evidence
   -> hooks, reports, ablations, and quality diagnostics
 ```
 
@@ -46,6 +60,7 @@ The important feedback loops are:
 - **Graph to schema**: failed quotes, weak edges, filtered entities, and rejected relation pairs become schema revision candidates.
 - **Negative evidence to schema**: rejected relation pairs are persisted as negative priors and counterexamples, so weak co-mentions do not silently become evolution edges.
 - **Edges to trajectories**: trusted edges are composed into evolution trajectories using temporal coherence, quote grounding, schema fit, and taxonomy locality.
+- **Successors to interpretation**: strict successor edges, when available, become the preferred substrate for dashboards, node cards, successor trajectories, macro patterns, and narrative reports.
 
 This makes EvoTaxa suitable for AI research evolution modeling and for social-science domains such as policy, governance, misinformation, polarization, education, or platform labor.
 
@@ -150,9 +165,7 @@ python -m evotaxa.cli run-full \
 ## Large-Corpus Social-Science Workflow
 
 The OpenAlex computational-social-science workflow is the current large-corpus reference path. It keeps expensive, domain-specific steps outside the default `run-full` command so each stage is auditable and resumable.
-The current baseline is title/abstract based. Full-text acquisition, storage,
-section extraction, and future incremental refresh rules are specified in
-[docs/fulltext_literature_management.md](docs/fulltext_literature_management.md).
+The current baseline is title/abstract based. Full-text acquisition and section extraction are optional data-preparation stages, not required inputs to the default evolution run.
 
 1. Download a corpus with resumable OpenAlex paging:
 
@@ -350,10 +363,8 @@ For large runs, the main interpretation layers are:
 ## Macro Pattern Synthesis
 
 The macro layer is optional. It should only be interpreted after entity cards and successor trajectories are stable for a real corpus.
-The pattern definitions are versioned in [docs/macro_pattern_ontology.md](docs/macro_pattern_ontology.md).
+The macro layer is documented in [docs/macro_pattern_synthesis.md](docs/macro_pattern_synthesis.md), and the operational pattern definitions are summarized below.
 They should be read as a first operational macro-pattern ontology, not as a final or exhaustive theory of field evolution.
-The longer-term technical roadmap for defensible method-evolution mining is in
-[docs/method_evolution_mining_technical_roadmap.md](docs/method_evolution_mining_technical_roadmap.md).
 
 Two implementations exist:
 
